@@ -1,0 +1,71 @@
+############################
+# 🔹 Logs
+############################
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+############################
+# 🔹 Frontend (React)
+############################
+spars_frontend/node_modules/
+spars_frontend/dist/
+spars_frontend/dist-ssr/
+spars_frontend/*.local
+
+############################
+# 🔹 Backend (Spring Boot)
+############################
+spars_server/build/
+spars_server/target/
+*.class
+
+############################
+# 🔹 Gradle
+############################
+.gradle
+!gradle/wrapper/gradle-wrapper.jar
+
+############################
+# 🔹 IDE / Editors
+############################
+.vscode/*
+!.vscode/extensions.json
+
+.idea
+*.iws
+*.iml
+*.ipr
+
+.classpath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+############################
+# 🔹 OS Files
+############################
+.DS_Store
+Thumbs.db
+
+############################
+# 🔹 Env files (IMPORTANT)
+############################
+.env
+*.env
+spars_frontend/.env
+spars_server/.env
+spars_server/application-*.properties
+
+############################
+# 🔹 Misc
+############################
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
