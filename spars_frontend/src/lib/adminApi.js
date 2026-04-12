@@ -1,5 +1,5 @@
 const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
+  import.meta.env.VITE_API_BASE_URL || 'https://mulyankan-spars.onrender.com'
 ).replace(/\/$/, '');
 
 const TOKEN_STORAGE_KEY = 'edutrack_token';
