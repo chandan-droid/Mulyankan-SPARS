@@ -4,7 +4,7 @@ FROM eclipse-temurin:17-jdk
 WORKDIR /app
 
 # Copy jar file
-COPY target/*.jar app.jar
+COPY build/libs/*-SNAPSHOT.jar app.jar
 
 # Expose port
 EXPOSE 8080
