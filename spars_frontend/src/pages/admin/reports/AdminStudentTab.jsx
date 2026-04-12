@@ -6,8 +6,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer } from 'recharts';
-import { FileText, FileSpreadsheet, Target, TrendingUp, Award, Users } from 'lucide-react';
+import { FileText, FileSpreadsheet, Target, TrendingUp, Award, Users, Loader2 } from 'lucide-react';
 import { getGrade, exportStudentReportPDF, exportToExcel, getPerformanceColor } from '@/lib/reportUtils';
+import { getAdminStudentCoAttainment } from '@/lib/adminApi';
 
 function PerformBadge({ pct }) {
   const color = pct >= 75 ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
@@ -51,24 +52,53 @@ export default function AdminStudentTab({ reportData }) {
     const maxPossible = rows.reduce((s, r) => s + r.maxMarks, 0);
     const pct = maxPossible > 0 ? +((totalMarks / maxPossible) * 100).toFixed(1) : 0;
 
-    // CO Data
-    const midsemMarks = studentMarks.filter(m => m.assessmentType === 'MIDSEM');
-    const coMap = {};
-    for (const m of midsemMarks) {
-      for (const qm of questionMarks.filter(q => q.markId === m.id)) {
-        const key = `CO${qm.coNumber}`;
-        if (!coMap[key]) coMap[key] = { obtained: 0, max: 0 };
-        coMap[key].obtained += qm.obtainedMarks;
-        coMap[key].max += qm.maxMarks;
-      }
-    }
-    const coData = Object.entries(coMap).map(([co, v]) => ({
-      co, obtained: v.obtained, max: v.max,
-      avg: v.max > 0 ? +((v.obtained / v.max) * 100).toFixed(1) : 0
-    })).sort((a,b) => a.co.localeCompare(b.co));
+    return { student, rows, totalMarks, maxPossible, pct, grade: getGrade(pct) };
+  }, [selStudent, allStudents, marks, allAssessments, allSubjects]);
 
-    return { student, rows, totalMarks, maxPossible, pct, grade: getGrade(pct), coData };
-  }, [selStudent, allStudents, marks, questionMarks, allAssessments, allSubjects]);
+  const studentSubjects = useMemo(() => {
+     if (!selStudent) return [];
+     const ids = new Set();
+     marks.filter(m => m.studentId === selStudent && m.subjectId).forEach(m => ids.add(m.subjectId));
+     return allSubjects.filter(s => ids.has(s.id));
+  }, [selStudent, marks, allSubjects]);
+
+  const [selectedSubjectId, setSelectedSubjectId] = useState('');
+  const [coData, setCoData] = useState([]);
+  const [loadingCo, setLoadingCo] = useState(false);
+
+  useEffect(() => {
+    if (studentSubjects.length > 0 && (!selectedSubjectId || !studentSubjects.find(s => String(s.id) === String(selectedSubjectId)))) {
+       setSelectedSubjectId(String(studentSubjects[0].id));
+    } else if (studentSubjects.length === 0) {
+       setSelectedSubjectId('');
+       setCoData([]);
+    }
+  }, [studentSubjects, selectedSubjectId]);
+
+  useEffect(() => {
+    if (!selStudent || !selectedSubjectId) {
+      setCoData([]);
+      return;
+    }
+    let cancel = false;
+    setLoadingCo(true);
+    getAdminStudentCoAttainment(selStudent, selectedSubjectId)
+       .then(res => {
+         if (cancel) return;
+         const formatted = (res?.coAttainments || []).map(co => ({
+            co: `CO${co.coNumber}`,
+            avg: co.attainmentLevel,
+         }));
+         setCoData(formatted);
+       })
+       .catch(() => {
+         if (!cancel) setCoData([]);
+       })
+       .finally(() => {
+         if (!cancel) setLoadingCo(false);
+       });
+    return () => { cancel = true; };
+  }, [selStudent, selectedSubjectId]);
 
   const handleExportPDF = () => {
     if (!report) return;
@@ -83,7 +113,7 @@ export default function AdminStudentTab({ reportData }) {
       maxPossible: report.maxPossible,
       percentage: report.pct.toString(),
       grade: report.grade.grade,
-      coData: report.coData
+      coData: coData
     });
   };
 
@@ -95,7 +125,7 @@ export default function AdminStudentTab({ reportData }) {
       Marks: r.marks,
       MaxMarks: r.maxMarks,
       Percentage: r.percentage + '%',
-      'CO Data Available': report.coData.length > 0 ? 'Yes' : 'No'
+      'CO Data Available': coData.length > 0 ? 'Yes' : 'No'
     })), `${report.student.name}_marks`);
   };
 
@@ -181,11 +211,31 @@ export default function AdminStudentTab({ reportData }) {
 
             {/* CO Radar */}
             <Card className="glass-card">
-              <CardHeader><CardTitle className="text-sm font-heading font-semibold">CO Performance</CardTitle></CardHeader>
+              <CardHeader className="flex flex-col space-y-2 pb-2">
+                <CardTitle className="text-sm font-heading font-semibold flex items-center justify-between">
+                  <span>CO Performance</span>
+                </CardTitle>
+                <Select value={selectedSubjectId} onValueChange={setSelectedSubjectId}>
+                  <SelectTrigger className="h-8 text-xs bg-background/50">
+                    <SelectValue placeholder="Select Subject" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {studentSubjects.map(s => (
+                      <SelectItem key={s.id} value={String(s.id)}>
+                        {s.subjectCode}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </CardHeader>
               <CardContent>
-                {report.coData.length > 0 ? (
+                {loadingCo ? (
+                  <div className="flex h-[260px] items-center justify-center text-xs text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading...
+                  </div>
+                ) : coData.length > 0 ? (
                   <ResponsiveContainer width="100%" height={260}>
-                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={report.coData}>
+                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={coData}>
                       <PolarGrid stroke="hsl(225,14%,90%)" />
                       <PolarAngleAxis dataKey="co" tick={{ fill: 'hsl(224,12%,48%)', fontSize: 11 }} />
                       <PolarRadiusAxis angle={30} domain={[0, 100]} />

@@ -312,3 +312,21 @@ export async function getAdminQuestionMarks({ markId } = {}) {
   });
   return Array.isArray(data) ? data.map(mapAdminQuestionMarkFromApi) : [];
 }
+
+export async function getAdminInstituteCoAttainment(subjectId) {
+  return request(`/api/admin/co-attainment/institute/subject/${subjectId}`, {
+    fallbackMessage: 'Failed to fetch institute CO attainment',
+  });
+}
+
+export async function getAdminClassCoAttainment(classId, subjectId) {
+  return request(`/api/admin/co-attainment/class/${classId}/subject/${subjectId}`, {
+    fallbackMessage: 'Failed to fetch class CO attainment',
+  });
+}
+
+export async function getAdminStudentCoAttainment(studentId, subjectId) {
+  return request(`/api/admin/co-attainment/student/${studentId}/subject/${subjectId}`, {
+    fallbackMessage: 'Failed to fetch student CO attainment',
+  });
+}

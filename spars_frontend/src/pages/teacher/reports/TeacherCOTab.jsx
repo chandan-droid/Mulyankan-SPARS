@@ -1,67 +1,52 @@
-import { useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RTC, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine, Cell } from 'recharts';
 import { Button } from '@/components/ui/button';
-import { FileText, Target } from 'lucide-react';
+import { FileText, Target, Loader2 } from 'lucide-react';
 import { getPerformanceColor, exportCOAttainmentPDF } from '@/lib/reportUtils';
-import { getMidsemTemplate, buildDefaultMidsemQuestions } from '@/data/store';
+import { getClassCoAttainment } from '@/lib/teacherApi';
 
-export default function TeacherCOTab({ reportData, selectedSubject, relevantStudents, branch, semester, section }) {
-  const marksData = Array.isArray(reportData?.marks) ? reportData.marks : [];
-  const questionMarksData = Array.isArray(reportData?.questionMarks) ? reportData.questionMarks : [];
+export default function TeacherCOTab({ reportData, selectedSubject, relevantStudents, branch, semester, section, classId }) {
   const threshold = 60; // 60% standard attainment threshold
 
-  const coData = useMemo(() => {
-    if (!selectedSubject) return [];
-    
-    // Get all MidSem marks for this subject for the class
-    const studentIds = relevantStudents.map(s => s.id);
-    const midsemMarks = marksData.filter(
-      (m) =>
-        String(m.subjectId) === String(selectedSubject) &&
-        String(m.assessmentType).toUpperCase() === 'MIDSEM' &&
-        studentIds.includes(m.studentId)
-    );
+  const [coData, setCoData] = useState([]);
+  const [loadingCo, setLoadingCo] = useState(false);
 
-    const coMap = {};
-    const assessmentTemplates = {};
-
-    for (const m of midsemMarks) {
-      if (!assessmentTemplates[m.assessmentId]) {
-         const t = getMidsemTemplate(m.assessmentId);
-         assessmentTemplates[m.assessmentId] = t ? t.questions : buildDefaultMidsemQuestions();
-      }
-      const questions = assessmentTemplates[m.assessmentId];
-
-      for (const qm of questionMarksData.filter(q => q.markId === m.id)) {
-        const match = questions.find(q => 
-           String(q.questionNumber) === String(qm.questionNumber) || 
-           String(questions.indexOf(q) + 1) === String(qm.questionNumber)
-        );
-
-        const rawCo = match?.coNumber ?? qm.coNumber ?? 1;
-        const cleanCo = String(rawCo).replace(/[^0-9]/g, '') || '1';
-        const key = `CO${cleanCo}`;
-        
-        const maxM = match?.maxMarks ?? qm.maxMarks ?? 0;
-
-        if (!coMap[key]) coMap[key] = { obtained: 0, max: 0 };
-        coMap[key].obtained += Number(qm.obtainedMarks ?? qm.marksObtained ?? 0);
-        coMap[key].max += Number(maxM);
-      }
+  useEffect(() => {
+    if (!selectedSubject || !classId || classId === 'undefined') {
+       setCoData([]);
+       return;
     }
-
-    return Object.entries(coMap).map(([co, v]) => ({
-      co, obtained: v.obtained, max: v.max,
-      avg: v.max > 0 ? +((v.obtained / v.max) * 100).toFixed(1) : 0
-    })).sort((a,b) => String(a.co).localeCompare(String(b.co), undefined, {numeric: true}));
-  }, [selectedSubject, relevantStudents, marksData, questionMarksData]);
+    
+    let cancel = false;
+    setLoadingCo(true);
+    getClassCoAttainment(classId, selectedSubject)
+      .then(res => {
+         if (cancel) return;
+         const formatted = (res?.coAttainments || []).map(co => ({
+            co: `CO${co.coNumber}`,
+            avg: co.attainmentLevel,
+         }));
+         setCoData(formatted);
+      })
+      .catch(() => {
+         if (!cancel) setCoData([]);
+      })
+      .finally(() => {
+         if (!cancel) setLoadingCo(false);
+      });
+      return () => { cancel = true; };
+  }, [classId, selectedSubject]);
 
   if (!selectedSubject) return null;
 
   return (
     <div className="space-y-6 animate-fade-in-up">
-      {coData.length > 0 ? (
+      {loadingCo ? (
+        <div className="flex py-16 items-center justify-center text-sm text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin mr-3 text-primary" /> Fetching class CO attainment...
+        </div>
+      ) : coData.length > 0 ? (
         <>
           <div className="flex justify-between items-end">
             <div>

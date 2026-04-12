@@ -4,8 +4,9 @@ import DashboardLayout from '@/components/DashboardLayout';
 import {
   LayoutDashboard, PenLine, FileBarChart, BookOpen, ClipboardList,
   ArrowUpRight, TrendingUp, Award, CheckCircle, Users, Calendar,
-  BarChart3, Settings,
+  BarChart3, Settings, Target,
 } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -14,6 +15,7 @@ import {
 import { Loader2 } from 'lucide-react';
 import {
   getMyAssignments, getMyAssessments as fetchMyAssessmentsApi,
+  getClassCoAttainment,
 } from '@/lib/teacherApi';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell,
@@ -100,6 +102,10 @@ export default function TeacherDashboard() {
   const [apiAssessments, setApiAssessments] = useState(null);
   const [isInitializing, setIsInitializing] = useState(true);
 
+  const [selectedAssignmentKey, setSelectedAssignmentKey] = useState('');
+  const [coData, setCoData] = useState([]);
+  const [loadingCo, setLoadingCo] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     setIsInitializing(true);
@@ -124,6 +130,38 @@ export default function TeacherDashboard() {
   // Use API data when available, else fall back to local store
   const assignments   = apiAssignments  ?? localAssignments;
   const assessments   = apiAssessments  ?? localAssessments;
+
+  useEffect(() => {
+    if (!selectedAssignmentKey && assignments.length > 0) {
+      const first = assignments[0];
+      setSelectedAssignmentKey(`${first.classId}|${first.subjectId}`);
+    }
+  }, [assignments, selectedAssignmentKey]);
+
+  useEffect(() => {
+    if (!selectedAssignmentKey) return;
+    const [classId, subjectId] = selectedAssignmentKey.split('|');
+    if (!classId || !subjectId || classId === 'undefined' || subjectId === 'undefined') return;
+
+    let cancel = false;
+    setLoadingCo(true);
+    getClassCoAttainment(classId, subjectId)
+      .then(res => {
+        if (cancel) return;
+        const formatted = (res?.coAttainments || []).map(co => ({
+          name: `CO${co.coNumber}`,
+          AvgPercentage: co.attainmentLevel,
+        }));
+        setCoData(formatted);
+      })
+      .catch(() => {
+        if (!cancel) setCoData([]);
+      })
+      .finally(() => {
+        if (!cancel) setLoadingCo(false);
+      });
+      return () => { cancel = true; };
+  }, [selectedAssignmentKey]);
 
   if (isInitializing) {
     return (
@@ -411,6 +449,65 @@ export default function TeacherDashboard() {
             />
           </div>
         </div>
+
+        {/* ── CO Attainment Row ───────────────────────────────────────── */}
+        <div className="rounded-2xl border border-border/50 bg-card/70 p-5 backdrop-blur-sm shadow-sm mt-6">
+          <div className="mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg stat-gradient-blue shadow">
+                <Target className="h-3.5 w-3.5 text-white" />
+              </div>
+              <div>
+                <p className="text-sm font-heading font-semibold text-foreground">Class CO Attainment</p>
+                <p className="text-[11px] text-muted-foreground">Course outcome tracking</p>
+              </div>
+            </div>
+            <div className="w-full sm:w-64">
+              <Select value={selectedAssignmentKey} onValueChange={setSelectedAssignmentKey}>
+                <SelectTrigger className="h-9 text-xs rounded-xl bg-background/50">
+                  <SelectValue placeholder="Select Class/Subject" />
+                </SelectTrigger>
+                <SelectContent>
+                  {assignments.map(a => {
+                    const sub = subjects.find(s => s.id === a.subjectId);
+                    return (
+                      <SelectItem key={`${a.classId}|${a.subjectId}`} value={`${a.classId}|${a.subjectId}`}>
+                        {sub?.subjectCode} {a.branch} S{a.semester}{a.section}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          
+          <div className="h-[250px]">
+             {loadingCo ? (
+               <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                 <Loader2 className="h-4 w-4 animate-spin mr-2" /> Syncing Attainment...
+               </div>
+             ) : coData.length > 0 ? (
+               <ResponsiveContainer width="100%" height="100%">
+                 <BarChart data={coData} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
+                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                   <XAxis dataKey="name" tickLine={false} axisLine={false} stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                   <YAxis domain={[0, 100]} tickLine={false} axisLine={false} stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                   <Tooltip cursor={{ fill: 'hsl(var(--muted)/0.35)' }} contentStyle={TOOLTIP_STYLE} />
+                   <Bar dataKey="AvgPercentage" radius={[6, 6, 0, 0]} barSize={36}>
+                      {coData.map((entry, i) => (
+                        <Cell key={i} fill={entry.AvgPercentage >= 60 ? 'hsl(168 60% 48%)' : 'hsl(0 72% 55%)'} />
+                      ))}
+                   </Bar>
+                 </BarChart>
+               </ResponsiveContainer>
+             ) : (
+               <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                 No CO Attainment data for selected combination.
+               </div>
+             )}
+          </div>
+        </div>
+
       </div>
     </DashboardLayout>
   );

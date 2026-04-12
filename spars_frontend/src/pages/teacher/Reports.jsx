@@ -378,6 +378,7 @@ export default function TeacherReports() {
                branch={currentAssignment?.branch}
                semester={currentAssignment?.semester}
                section={currentAssignment?.section}
+               classId={currentAssignment?.classId}
              />
            ) : (
              <div className="text-center py-24 text-muted-foreground"><BookOpen className="h-10 w-10 mx-auto mb-3 opacity-20" />Select a Class/Subject above to view reports.</div>

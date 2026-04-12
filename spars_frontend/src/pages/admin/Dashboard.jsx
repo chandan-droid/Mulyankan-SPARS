@@ -1,13 +1,15 @@
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   LayoutDashboard, Users, BookOpen, UserCog, ClipboardList,
   BarChart2, Blocks, Activity, Award, ArrowUpRight,
-  TrendingUp, ShieldCheck, Settings, Loader2,
+  TrendingUp, ShieldCheck, Settings, Loader2, Target,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
+  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Legend
 } from 'recharts';
 import {
   getStudents, getSubjects, getTeachers, getAssessments,
@@ -21,6 +23,9 @@ import {
   getAdminClasses,
   getAdminTeacherAssignments,
   getAdminMarks,
+  getAdminInstituteCoAttainment,
+  getAdminClassCoAttainment,
+  getAdminStudentCoAttainment,
 } from '@/lib/adminApi';
 
 const navItems = [
@@ -94,6 +99,12 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
 
   const [loadingLiveData, setLoadingLiveData] = useState(true);
+  const [selectedSubjectId, setSelectedSubjectId] = useState('');
+  const [selectedClassId, setSelectedClassId] = useState('ALL');
+  const [selectedStudentId, setSelectedStudentId] = useState('ALL');
+  const [coData, setCoData] = useState([]);
+  const [loadingCo, setLoadingCo] = useState(false);
+
   const [dashboardData, setDashboardData] = useState(() => ({
     students: getStudents(),
     subjects: getSubjects(),
@@ -236,6 +247,57 @@ export default function AdminDashboard() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!selectedSubjectId && dashboardData.subjects.length > 0) {
+      setSelectedSubjectId(String(dashboardData.subjects[0].id));
+    }
+  }, [dashboardData.subjects, selectedSubjectId]);
+
+  useEffect(() => {
+    if (!selectedSubjectId) return;
+    let cancel = false;
+    setLoadingCo(true);
+    
+    Promise.all([
+      getAdminInstituteCoAttainment(selectedSubjectId),
+      selectedClassId && selectedClassId !== 'ALL' ? getAdminClassCoAttainment(selectedClassId, selectedSubjectId) : Promise.resolve({ coAttainments: [] }),
+      selectedStudentId && selectedStudentId !== 'ALL' ? getAdminStudentCoAttainment(selectedStudentId, selectedSubjectId) : Promise.resolve({ coAttainments: [] })
+    ]).then(([resInst, resClass, resStu]) => {
+      if (cancel) return;
+      const fInst = resInst?.coAttainments || [];
+      const fClass = resClass?.coAttainments || [];
+      const fStudent = resStu?.coAttainments || [];
+
+      const allCos = new Set([...fInst, ...fClass, ...fStudent].map(x => x.coNumber));
+
+      const formatted = Array.from(allCos).sort((a,b)=>a-b).map(co => ({
+          name: `CO${co}`,
+          Institute: fInst.find(x => x.coNumber === co)?.attainmentLevel || 0,
+          Class: fClass.find(x => x.coNumber === co)?.attainmentLevel || 0,
+          Student: fStudent.find(x => x.coNumber === co)?.attainmentLevel || 0,
+      }));
+      setCoData(formatted);
+    })
+    .catch(() => {
+      if (!cancel) setCoData([]);
+    })
+    .finally(() => {
+      if (!cancel) setLoadingCo(false);
+    });
+    return () => { cancel = true; };
+  }, [selectedSubjectId, selectedClassId, selectedStudentId]);
+
+  const availableClasses = dashboardData.classes.filter(c => 
+    dashboardData.assignments.some(a => String(a.subjectId) === selectedSubjectId && String(a.classId) === String(c.id))
+  );
+
+  const availableStudents = dashboardData.students.filter(s => {
+    if (selectedClassId === 'ALL') return true;
+    const c = dashboardData.classes.find(cls => String(cls.id) === selectedClassId);
+    if (!c) return true;
+    return s.branch === c.branch && s.semester === c.semester && s.section === c.section;
+  });
 
   const students = dashboardData.students;
   const subjects = dashboardData.subjects;
@@ -506,6 +568,88 @@ export default function AdminDashboard() {
                 <p className="text-xs text-muted-foreground">No class data yet.</p>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* ── CO Attainment Row ───────────────────────────────────────── */}
+        <div className="rounded-2xl border border-border/50 bg-card/70 p-5 backdrop-blur-sm shadow-sm mt-6">
+          <div className="mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg stat-gradient-blue shadow">
+                <Target className="h-3.5 w-3.5 text-white" />
+              </div>
+              <div>
+                <p className="text-sm font-heading font-semibold text-foreground">CO Attainment Radar</p>
+                <p className="text-[11px] text-muted-foreground">Institute, Class, Student Views</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+              <Select value={selectedSubjectId} onValueChange={setSelectedSubjectId}>
+                <SelectTrigger className="w-32 h-9 text-xs rounded-xl bg-background/50">
+                  <SelectValue placeholder="Subject" />
+                </SelectTrigger>
+                <SelectContent>
+                  {subjects.map(s => (
+                    <SelectItem key={s.id} value={String(s.id)}>
+                      {s.subjectCode}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={selectedClassId} onValueChange={setSelectedClassId}>
+                <SelectTrigger className="w-32 h-9 text-xs rounded-xl bg-background/50">
+                  <SelectValue placeholder="Class" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All Classes</SelectItem>
+                  {availableClasses.map(c => (
+                    <SelectItem key={c.id} value={String(c.id)}>{c.branch} S{c.semester}{c.section}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={selectedStudentId} onValueChange={setSelectedStudentId}>
+                <SelectTrigger className="w-32 h-9 text-xs rounded-xl bg-background/50">
+                  <SelectValue placeholder="Student" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All Students</SelectItem>
+                  {availableStudents.map(s => (
+                    <SelectItem key={s.id} value={String(s.id)}>{s.name} ({s.regNo})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          
+          <div className="h-[280px]">
+            {loadingCo ? (
+              <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin mr-2" /> Syncing Attainment...
+              </div>
+            ) : coData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart cx="50%" cy="50%" outerRadius="75%" data={coData}>
+                  <PolarGrid stroke="hsl(var(--border))" />
+                  <PolarAngleAxis dataKey="name" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} />
+                  <PolarRadiusAxis 
+                    angle={30} 
+                    domain={[0, 'auto']} 
+                    tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} 
+                  />
+                  <Radar name="Institute" dataKey="Institute" stroke="hsl(235,65%,55%)" fill="hsl(235,65%,55%)" fillOpacity={0.3} />
+                  {selectedClassId !== 'ALL' && <Radar name="Class" dataKey="Class" stroke="hsl(168,60%,48%)" fill="hsl(168,60%,48%)" fillOpacity={0.4} />}
+                  {selectedStudentId !== 'ALL' && <Radar name="Student" dataKey="Student" stroke="hsl(35,95%,58%)" fill="hsl(35,95%,58%)" fillOpacity={0.5} />}
+                  <Tooltip wrapperStyle={{ borderRadius: '12px' }} />
+                  <Legend />
+                </RadarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                No CO Attainment data for selected subject.
+              </div>
+            )}
           </div>
         </div>
       </div>

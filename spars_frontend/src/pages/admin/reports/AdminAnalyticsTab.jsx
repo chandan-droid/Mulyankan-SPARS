@@ -1,13 +1,14 @@
-import { useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell,
   ResponsiveContainer, CartesianGrid, Legend,
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
 } from 'recharts';
-import { Users, TrendingUp, Award, ClipboardList, Target } from 'lucide-react';
+import { Users, TrendingUp, Award, ClipboardList, Target, Loader2 } from 'lucide-react';
 import { getGrade } from '@/lib/reportUtils';
-import { getMidsemTemplate, buildDefaultMidsemQuestions } from '@/data/store';
+import { getAdminInstituteCoAttainment } from '@/lib/adminApi';
 
 const CHART_COLORS = [
   'hsl(235,65%,55%)',
@@ -21,6 +22,7 @@ const CHART_COLORS = [
 export default function AdminAnalyticsTab({ reportData }) {
   const allStudents = reportData?.students ?? [];
   const allAssessments = reportData?.assessments ?? [];
+  const allSubjects = reportData?.subjects ?? [];
   const marks = reportData?.marks ?? [];
   const questionMarks = reportData?.questionMarks ?? [];
 
@@ -71,50 +73,38 @@ export default function AdminAnalyticsTab({ reportData }) {
     }));
   }, [marks, allAssessments]);
 
-  // Institution wide CO Attainment
-  const coAttainmentData = useMemo(() => {
-    const coMap = {};
-    const midsemAssessments = new Map();
-    const midsemMarkIds = new Map(); // markId -> assessmentId
-    
-    marks.forEach(m => {
-      const a = allAssessments.find(x => x.id === m.assessmentId);
-      if (a && String(a.type).toUpperCase() === 'MIDSEM') {
-         midsemMarkIds.set(m.id, m.assessmentId);
-         if (!midsemAssessments.has(m.assessmentId)) {
-            const t = getMidsemTemplate(m.assessmentId);
-            midsemAssessments.set(m.assessmentId, t ? t.questions : buildDefaultMidsemQuestions());
-         }
-      }
-    });
+  const [selectedSubjectId, setSelectedSubjectId] = useState('');
+  const [coData, setCoData] = useState([]);
+  const [loadingCo, setLoadingCo] = useState(false);
 
-    for (const qm of questionMarks) {
-      const assessmentId = midsemMarkIds.get(qm.markId);
-      if (!assessmentId) continue;
-      
-      const questions = midsemAssessments.get(assessmentId) || [];
-      const match = questions.find(q => 
-         String(q.questionNumber) === String(qm.questionNumber) || 
-         String(questions.indexOf(q) + 1) === String(qm.questionNumber)
-      );
-
-      const rawCo = match?.coNumber ?? qm.coNumber ?? 1;
-      const cleanCo = String(rawCo).replace(/[^0-9]/g, '') || '1';
-      const key = `CO${cleanCo}`;
-      
-      const maxM = match?.maxMarks ?? qm.maxMarks ?? 0;
-
-      if (!coMap[key]) coMap[key] = { obtained: 0, max: 0 };
-      coMap[key].obtained += Number(qm.obtainedMarks ?? qm.marksObtained ?? 0);
-      coMap[key].max += Number(maxM);
+  useEffect(() => {
+    if (!selectedSubjectId && allSubjects.length > 0) {
+      setSelectedSubjectId(String(allSubjects[0].id));
     }
-    const result = Object.entries(coMap).map(([co, v]) => ({
-      co,
-      attainment: v.max > 0 ? +((v.obtained / v.max) * 100).toFixed(1) : 0,
-      fullMark: 100
-    }));
-    return result.sort((a,b) => String(a.co).localeCompare(String(b.co), undefined, {numeric: true}));
-  }, [questionMarks, marks, allAssessments]);
+  }, [allSubjects, selectedSubjectId]);
+
+  useEffect(() => {
+    if (!selectedSubjectId) return;
+    let cancel = false;
+    setLoadingCo(true);
+    getAdminInstituteCoAttainment(selectedSubjectId)
+      .then(res => {
+        if (cancel) return;
+        const formatted = (res?.coAttainments || []).map(co => ({
+          co: `CO${co.coNumber}`,
+          attainment: co.attainmentLevel,
+          fullMark: 100
+        }));
+        setCoData(formatted);
+      })
+      .catch(() => {
+        if (!cancel) setCoData([]);
+      })
+      .finally(() => {
+        if (!cancel) setLoadingCo(false);
+      });
+    return () => { cancel = true; };
+  }, [selectedSubjectId]);
 
   return (
     <div className="space-y-6 animate-fade-in-up">
@@ -141,15 +131,31 @@ export default function AdminAnalyticsTab({ reportData }) {
       <div className="grid gap-6 lg:grid-cols-2">
         {/* CO Attainment Radar */}
         <Card className="glass-card">
-          <CardHeader>
-            <CardTitle className="text-sm font-heading font-semibold flex items-center gap-2">
-              <Target className="h-4 w-4 text-primary" /> Institution CO Attainment
+          <CardHeader className="flex flex-col space-y-2 pb-2">
+            <CardTitle className="text-sm font-heading font-semibold flex items-center justify-between">
+              <span className="flex items-center gap-2"><Target className="h-4 w-4 text-primary" /> Institution CO Attainment</span>
             </CardTitle>
+            <Select value={selectedSubjectId} onValueChange={setSelectedSubjectId}>
+              <SelectTrigger className="h-8 text-xs bg-background/50">
+                <SelectValue placeholder="Select Subject" />
+              </SelectTrigger>
+              <SelectContent>
+                {allSubjects.map(s => (
+                  <SelectItem key={s.id} value={String(s.id)}>
+                    {s.subjectCode} - {s.subjectName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </CardHeader>
           <CardContent>
-            {coAttainmentData.length > 0 ? (
+            {loadingCo ? (
+              <div className="flex h-[260px] items-center justify-center text-xs text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading attainment...
+              </div>
+            ) : coData.length > 0 ? (
               <ResponsiveContainer width="100%" height={260}>
-                <RadarChart cx="50%" cy="50%" outerRadius="75%" data={coAttainmentData}>
+                <RadarChart cx="50%" cy="50%" outerRadius="75%" data={coData}>
                   <PolarGrid stroke="hsl(225,14%,90%)" />
                   <PolarAngleAxis dataKey="co" tick={{ fill: 'hsl(224,12%,48%)', fontSize: 11 }} />
                   <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: 'hsl(224,12%,48%)', fontSize: 10 }} />

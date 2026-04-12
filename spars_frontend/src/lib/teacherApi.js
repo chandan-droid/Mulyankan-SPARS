@@ -513,3 +513,33 @@ export async function saveMidsemMarkWithQuestions(assessmentId, markData, questi
 export async function saveSimpleMarksBulk(assessmentId, rows) {
   return createMarksBulk(assessmentId, rows);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  6. CO ATTAINMENT
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Fetch CO attainment for a student in a subject.
+ * @param {number} studentId
+ * @param {number} subjectId
+ * @returns {Promise<object>} CO attainment report.
+ */
+export async function getStudentCoAttainment(studentId, subjectId) {
+  const data = await request(`/api/teacher/co-attainment/student/${studentId}/subject/${subjectId}`, {
+    fallback: `Failed to fetch CO attainment for student ${studentId}`,
+  });
+  return data;
+}
+
+/**
+ * Fetch CO attainment for a class in a subject.
+ * @param {number} classId
+ * @param {number} subjectId
+ * @returns {Promise<object>} CO attainment report.
+ */
+export async function getClassCoAttainment(classId, subjectId) {
+  const data = await request(`/api/teacher/co-attainment/class/${classId}/subject/${subjectId}`, {
+    fallback: `Failed to fetch CO attainment for class ${classId}`,
+  });
+  return data;
+}

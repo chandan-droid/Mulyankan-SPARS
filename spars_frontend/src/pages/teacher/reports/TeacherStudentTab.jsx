@@ -6,8 +6,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip as RTC, Legend } from 'recharts';
-import { FileText, FileSpreadsheet, Target, TrendingUp, Award, Users } from 'lucide-react';
+import { FileText, FileSpreadsheet, Target, TrendingUp, Award, Users, Loader2 } from 'lucide-react';
 import { getGrade, exportStudentReportPDF, exportToExcel } from '@/lib/reportUtils';
+import { getStudentCoAttainment } from '@/lib/teacherApi';
 
 function PerformBadge({ pct }) {
   const color = pct >= 75 ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : pct >= 50 ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-red-100 text-red-700 border-red-200';
@@ -52,22 +53,6 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
       max: m.assessmentInfo?.maxMarks || 0
     }));
 
-    // CO Data
-    const midsemMarks = studentMarks.filter(m => String(m.assessmentType || m.assessmentInfo?.type).toUpperCase() === 'MIDSEM');
-    const coMap = {};
-    for (const m of midsemMarks) {
-      for (const qm of questionMarks.filter(q => q.markId === m.id)) {
-        const key = `CO${qm.coNumber}`;
-        if (!coMap[key]) coMap[key] = { obtained: 0, max: 0 };
-        coMap[key].obtained += qm.obtainedMarks;
-        coMap[key].max += qm.maxMarks;
-      }
-    }
-    const coData = Object.entries(coMap).map(([co, v]) => ({
-      co, obtained: v.obtained, max: v.max,
-      avg: v.max > 0 ? +((v.obtained / v.max) * 100).toFixed(1) : 0
-    })).sort((a,b) => a.co.localeCompare(b.co));
-
     // Percentile Calc
     const subjectMarksForOtherStudents = {};
     marks.filter(m => m.subjectId === selectedSubject).forEach(m => {
@@ -82,8 +67,36 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
       percentile = +((below / (allPcts.length - 1))*100).toFixed(1);
     }
 
-    return { student, rows, totalMarks, maxPossible, pct, grade: getGrade(pct), coData, progressData, percentile };
-  }, [selectedStudent, selectedSubject, relevantStudents, marks, questionMarks, allAssessments, subjectInfo]);
+    return { student, rows, totalMarks, maxPossible, pct, grade: getGrade(pct), progressData, percentile };
+  }, [selectedStudent, selectedSubject, relevantStudents, marks, allAssessments, subjectInfo]);
+
+  const [coData, setCoData] = useState([]);
+  const [loadingCo, setLoadingCo] = useState(false);
+
+  useEffect(() => {
+    if (!selectedStudent || !selectedSubject) {
+      setCoData([]);
+      return;
+    }
+    let cancel = false;
+    setLoadingCo(true);
+    getStudentCoAttainment(selectedStudent, selectedSubject)
+      .then(res => {
+         if (cancel) return;
+         const formatted = (res?.coAttainments || []).map(co => ({
+            co: `CO${co.coNumber}`,
+            avg: co.attainmentLevel,
+         }));
+         setCoData(formatted);
+      })
+      .catch(() => {
+         if (!cancel) setCoData([]);
+      })
+      .finally(() => {
+         if (!cancel) setLoadingCo(false);
+      });
+      return () => { cancel = true; };
+  }, [selectedStudent, selectedSubject]);
 
   return (
     <div className="space-y-6 animate-fade-in-up">
@@ -118,7 +131,7 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
               </div>
             </div>
             <div className="flex gap-2">
-              <Button size="sm" className="btn-gradient text-white rounded-xl gap-2 text-xs" onClick={() => exportStudentReportPDF({ studentName: report.student.name, regNo: report.student.regNo, branch: report.student.branch, semester: report.student.semester, section: report.student.section, rows: report.rows, totalMarks: report.totalMarks, maxPossible: report.maxPossible, percentage: report.pct.toString(), grade: report.grade.grade, coData: report.coData })}><FileText className="h-3.5 w-3.5" /> PDF</Button>
+              <Button size="sm" className="btn-gradient text-white rounded-xl gap-2 text-xs" onClick={() => exportStudentReportPDF({ studentName: report.student.name, regNo: report.student.regNo, branch: report.student.branch, semester: report.student.semester, section: report.student.section, rows: report.rows, totalMarks: report.totalMarks, maxPossible: report.maxPossible, percentage: report.pct.toString(), grade: report.grade.grade, coData: coData })}><FileText className="h-3.5 w-3.5" /> PDF</Button>
               <Button size="sm" variant="outline" className="rounded-xl gap-2 text-xs" onClick={() => exportToExcel(report.rows.map(r => ({ Subject: r.subject, Type: r.type, Marks: r.marks, MaxMarks: r.maxMarks, Percentage: r.percentage + '%' })), `${report.student.name}_marks`)}><FileSpreadsheet className="h-3.5 w-3.5" /> Excel</Button>
             </div>
           </div>
@@ -174,9 +187,13 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
             <Card className="glass-card">
               <CardHeader><CardTitle className="text-sm font-heading font-semibold">CO Radar Chart</CardTitle></CardHeader>
               <CardContent>
-                {report.coData.length > 0 ? (
+                {loadingCo ? (
+                  <div className="flex h-[260px] items-center justify-center text-xs text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading...
+                  </div>
+                ) : coData.length > 0 ? (
                   <ResponsiveContainer width="100%" height={260}>
-                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={report.coData}>
+                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={coData}>
                       <PolarGrid stroke="hsl(225,14%,90%)" />
                       <PolarAngleAxis dataKey="co" tick={{ fill: 'hsl(224,12%,48%)', fontSize: 11 }} />
                       <PolarRadiusAxis angle={30} domain={[0, 100]} />
