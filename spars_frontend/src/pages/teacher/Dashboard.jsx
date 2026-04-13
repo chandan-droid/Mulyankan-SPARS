@@ -18,7 +18,7 @@ import {
   getClassCoAttainment,
 } from '@/lib/teacherApi';
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell,
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, CartesianGrid
 } from 'recharts';
 
 const navItems = [

@@ -25,4 +25,7 @@ public interface QuestionMarkRepository extends JpaRepository<QuestionMark, Long
 
     @Query("SELECT qm FROM QuestionMark qm JOIN qm.mark m WHERE m.assessment.subject.id = :subjectId")
     List<QuestionMark> findBySubject(@Param("subjectId") Long subjectId);
+
+    @Query("SELECT qm FROM QuestionMark qm WHERE qm.mark.assessment.id = :assessmentId AND qm.mark.student.academicClass.id = :classId")
+    List<QuestionMark> findByAssessmentAndClass(@Param("assessmentId") Long assessmentId, @Param("classId") Long classId);
 }

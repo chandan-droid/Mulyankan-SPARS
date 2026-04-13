@@ -31,7 +31,27 @@ public class AnalyticsService {
         if (marks.isEmpty()) {
             return List.of();
         }
+        return calculatePerformanceDistribution(marks);
+    }
 
+    public List<PerformanceDistributionDTO> getPerformanceDistribution(Long classId, Long subjectId) {
+        List<Mark> marks;
+        if (subjectId != null) {
+            List<Mark> classMarks = markRepository.findByStudent_AcademicClassId(classId);
+            marks = classMarks.stream()
+                    .filter(mark -> mark.getAssessment().getSubject().getId().equals(subjectId))
+                    .collect(Collectors.toList());
+        } else {
+            marks = markRepository.findByStudent_AcademicClassId(classId);
+        }
+
+        if (marks.isEmpty()) {
+            return List.of();
+        }
+        return calculatePerformanceDistribution(marks);
+    }
+
+    private List<PerformanceDistributionDTO> calculatePerformanceDistribution(List<Mark> marks) {
         Map<String, Long> distribution = marks.stream()
                 .collect(Collectors.groupingBy(
                         mark -> {
@@ -72,8 +92,48 @@ public class AnalyticsService {
                 .collect(Collectors.toList());
     }
 
+    public List<StudentPerformanceDTO> getTopPerformers(Long classId, Long subjectId, int count) {
+        return getStudentPerformances(classId, subjectId).stream()
+                .sorted(Comparator.comparingDouble(StudentPerformanceDTO::getOverallPercentage).reversed())
+                .limit(count)
+                .collect(Collectors.toList());
+    }
+
+    public List<StudentPerformanceDTO> getBottomPerformers(Long classId, Long subjectId, int count) {
+        return getStudentPerformances(classId, subjectId).stream()
+                .sorted(Comparator.comparingDouble(StudentPerformanceDTO::getOverallPercentage))
+                .limit(count)
+                .collect(Collectors.toList());
+    }
+
     private List<StudentPerformanceDTO> getStudentPerformances(Long subjectId) {
         List<Mark> marks = markRepository.findBySubjectId(subjectId);
+        Map<Student, List<Mark>> marksByStudent = marks.stream()
+                .collect(Collectors.groupingBy(Mark::getStudent));
+
+        return marksByStudent.entrySet().stream()
+                .map(entry -> {
+                    Student student = entry.getKey();
+                    List<Mark> studentMarks = entry.getValue();
+                    double totalObtained = studentMarks.stream().mapToDouble(Mark::getTotalMarks).sum();
+                    double totalMax = studentMarks.stream().mapToDouble(m -> m.getAssessment().getMaxMarks()).sum();
+                    double overallPercentage = (totalMax > 0) ? (totalObtained / totalMax) * 100 : 0.0;
+                    return new StudentPerformanceDTO(student.getId(), student.getName(), overallPercentage);
+                })
+                .collect(Collectors.toList());
+    }
+
+    private List<StudentPerformanceDTO> getStudentPerformances(Long classId, Long subjectId) {
+        List<Mark> marks;
+        if (subjectId != null) {
+            List<Mark> classMarks = markRepository.findByStudent_AcademicClassId(classId);
+            marks = classMarks.stream()
+                    .filter(mark -> mark.getAssessment().getSubject().getId().equals(subjectId))
+                    .collect(Collectors.toList());
+        } else {
+            marks = markRepository.findByStudent_AcademicClassId(classId);
+        }
+
         Map<Student, List<Mark>> marksByStudent = marks.stream()
                 .collect(Collectors.groupingBy(Mark::getStudent));
 

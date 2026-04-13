@@ -3,6 +3,8 @@ package com.devdroid.spars_server.service.teacher;
 import com.devdroid.spars_server.dto.QuestionMarkCreateRequest;
 import com.devdroid.spars_server.dto.QuestionMarkDTO;
 import com.devdroid.spars_server.dto.QuestionMarkUpdateRequest;
+import com.devdroid.spars_server.dto.StudentQuestionMarksRequest;
+import com.devdroid.spars_server.dto.TeacherQuestionMarkBulkUpsertRequest;
 import com.devdroid.spars_server.entity.Assessment;
 import com.devdroid.spars_server.entity.AssessmentType;
 import com.devdroid.spars_server.entity.Mark;
@@ -11,7 +13,12 @@ import com.devdroid.spars_server.exception.DuplicateResourceException;
 import com.devdroid.spars_server.exception.ResourceNotFoundException;
 import com.devdroid.spars_server.repository.MarkRepository;
 import com.devdroid.spars_server.repository.QuestionMarkRepository;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -94,6 +101,49 @@ public class TeacherQuestionMarkService {
         QuestionMark questionMark = questionMarkRepository.findById(questionMarkId)
                 .orElseThrow(() -> new ResourceNotFoundException("QuestionMark not found with id: " + questionMarkId));
         return toQuestionMarkDto(questionMark);
+    }
+
+    @Transactional(readOnly = true)
+    public List<QuestionMarkDTO> getQuestionMarksByAssessmentAndClass(Long assessmentId, Long classId) {
+        return questionMarkRepository.findByAssessmentAndClass(assessmentId, classId).stream()
+                .map(this::toQuestionMarkDto)
+                .toList();
+    }
+
+    @Transactional
+    public List<QuestionMarkDTO> saveQuestionMarksByAssessmentAndClass(Long assessmentId, Long classId, TeacherQuestionMarkBulkUpsertRequest request) {
+        List<Mark> marks = markRepository.findByAssessmentIdAndStudentAcademicClassId(assessmentId, classId);
+        Map<Long, Mark> marksByStudentId = marks.stream()
+                .collect(Collectors.toMap(mark -> mark.getStudent().getId(), Function.identity()));
+
+        List<QuestionMark> allUpsertedQuestionMarks = new ArrayList<>();
+
+        for (StudentQuestionMarksRequest studentMarksRequest : request.getStudentMarks()) {
+            Long studentId = studentMarksRequest.getStudentId();
+            Mark mark = marksByStudentId.get(studentId);
+
+            if (mark == null) {
+                // Or handle this case as an error, depending on requirements
+                continue;
+            }
+
+            for (QuestionMarkCreateRequest qmRequest : studentMarksRequest.getQuestionMarks()) {
+                Optional<QuestionMark> existingQm = questionMarkRepository.findByMarkIdAndQuestionNumber(mark.getId(), qmRequest.getQuestionNumber());
+
+                QuestionMark questionMark = existingQm.orElse(new QuestionMark());
+                questionMark.setMark(mark);
+                questionMark.setQuestionNumber(qmRequest.getQuestionNumber());
+                questionMark.setCoNumber(qmRequest.getCoNumber());
+                questionMark.setMaxMarks(qmRequest.getMaxMarks());
+                questionMark.setObtainedMarks(qmRequest.getObtainedMarks());
+
+                allUpsertedQuestionMarks.add(questionMark);
+            }
+        }
+
+        return questionMarkRepository.saveAll(allUpsertedQuestionMarks).stream()
+                .map(this::toQuestionMarkDto)
+                .toList();
     }
 
     private QuestionMarkDTO toQuestionMarkDto(QuestionMark questionMark) {

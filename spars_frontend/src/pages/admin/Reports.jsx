@@ -29,7 +29,6 @@ import AdminClassTab from './reports/AdminClassTab';
 import AdminSubjectTab from './reports/AdminSubjectTab';
 import AdminBranchTab from './reports/AdminBranchTab';
 import AdminTeacherTab from './reports/AdminTeacherTab';
-import AdminImportTab from './reports/AdminImportTab';
 
 export default function AdminReports() {
   const [loadingData, setLoadingData] = useState(true);
@@ -237,9 +236,6 @@ export default function AdminReports() {
           <TabsTrigger value="teacher" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
             👨‍🏫 Teacher View
           </TabsTrigger>
-          <TabsTrigger value="import" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
-            📂 Import Data
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="analytics" className="animate-fade-in-up mt-6">
@@ -264,10 +260,6 @@ export default function AdminReports() {
 
         <TabsContent value="teacher" className="animate-fade-in-up mt-6">
           <AdminTeacherTab reportData={reportData} />
-        </TabsContent>
-
-        <TabsContent value="import" className="animate-fade-in-up mt-6">
-          <AdminImportTab />
         </TabsContent>
       </Tabs>
     </DashboardLayout>

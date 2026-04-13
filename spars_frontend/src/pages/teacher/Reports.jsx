@@ -25,7 +25,6 @@ import TeacherClassTab from './reports/TeacherClassTab';
 import TeacherStudentTab from './reports/TeacherStudentTab';
 import TeacherCOTab from './reports/TeacherCOTab';
 import TeacherDeepDiveTab from './reports/TeacherDeepDiveTab';
-import TeacherImportTab from './reports/TeacherImportTab';
 
 function assignmentKey(assignment) {
   if (assignment.classId != null) {
@@ -112,17 +111,6 @@ export default function TeacherReports() {
     if (apiAssignments && apiAssignments.length > 0) return apiAssignments;
     return localAssignments;
   }, [apiAssignments, localAssignments]);
-
-  if (loadingAssignments) {
-    return (
-      <DashboardLayout navItems={teacherNavItems}>
-        <div className="flex h-[60vh] flex-col items-center justify-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="text-sm font-medium text-muted-foreground animate-pulse">Gathering report data...</p>
-        </div>
-      </DashboardLayout>
-    );
-  }
 
   const assignedSubjects = useMemo(() => {
     const seen = new Set();
@@ -279,6 +267,17 @@ export default function TeacherReports() {
     rawAssignments,
   ]);
 
+  if (loadingAssignments) {
+    return (
+      <DashboardLayout navItems={teacherNavItems}>
+        <div className="flex h-[60vh] flex-col items-center justify-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm font-medium text-muted-foreground animate-pulse">Gathering report data...</p>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout navItems={teacherNavItems}>
       {/* Header */}
@@ -336,9 +335,6 @@ export default function TeacherReports() {
           <TabsTrigger value="deepdive" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
             🔍 Assessment Deep Dive
           </TabsTrigger>
-          <TabsTrigger value="import" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
-            📂 Import Data
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="classOverview" className="mt-6">
@@ -391,10 +387,6 @@ export default function TeacherReports() {
            ) : (
              <div className="text-center py-24 text-muted-foreground"><BookOpen className="h-10 w-10 mx-auto mb-3 opacity-20" />Select a Class/Subject above to view reports.</div>
            )}
-        </TabsContent>
-
-        <TabsContent value="import" className="mt-6">
-           <TeacherImportTab selectedSubject={selectedSubject} reportData={reportData} />
         </TabsContent>
       </Tabs>
     </DashboardLayout>

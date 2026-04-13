@@ -23,7 +23,7 @@
  */
 
 const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
+  import.meta.env.VITE_API_BASE_URL || 'https://mulyankan-spars.onrender.com'
 ).replace(/\/$/, '');
 
 const TOKEN_STORAGE_KEY = 'edutrack_token';
@@ -438,6 +438,35 @@ export async function getQuestionMarkDetail(questionMarkId) {
     fallback: `Failed to fetch question mark ${questionMarkId}`,
   });
   return normalizeQuestionMark(data);
+}
+
+/**
+ * Fetch all question marks for a specific assessment and class combination.
+ * @param {number} assessmentId 
+ * @param {number} classId 
+ * @returns {Promise<Array>} List of normalized question marks
+ */
+export async function getQuestionMarksByAssessmentAndClass(assessmentId, classId) {
+  const data = await request(`/api/teacher/question-marks/assessment/${assessmentId}/class/${classId}`, {
+    fallback: `Failed to fetch question marks for assessment ${assessmentId} and class ${classId}`,
+  });
+  return Array.isArray(data) ? data.map(normalizeQuestionMark) : [];
+}
+
+/**
+ * Bulk save/upsert question marks for an assessment and class.
+ * @param {number} assessmentId 
+ * @param {number} classId 
+ * @param {Array} studentMarks Array of { studentId, questionMarks: [{ questionNumber, coNumber, maxMarks, obtainedMarks }] }
+ * @returns {Promise<Array>} List of saved normalized question marks
+ */
+export async function saveQuestionMarksByAssessmentAndClass(assessmentId, classId, studentMarks) {
+  const data = await request(`/api/teacher/question-marks/assessment/${assessmentId}/class/${classId}/bulk`, {
+    method: 'POST',
+    body: { studentMarks },
+    fallback: `Failed to bulk save question marks for assessment ${assessmentId} and class ${classId}`,
+  });
+  return Array.isArray(data) ? data.map(normalizeQuestionMark) : [];
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

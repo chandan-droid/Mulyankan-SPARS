@@ -27,6 +27,8 @@ import {
   updateQuestionMark,
   getMarksByAssessment as fetchMarksByAssessmentApi,
   getQuestionMarksByMark as fetchQuestionMarksByMarkApi,
+  getQuestionMarksByAssessmentAndClass as fetchQuestionMarksByAssessmentAndClassApi,
+  saveQuestionMarksByAssessmentAndClass as saveQuestionMarksBulkApi,
   getStudentsByClass as fetchStudentsByClassApi,
 } from '@/lib/teacherApi';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -260,16 +262,39 @@ export default function MarkEntry() {
     const numQ = template.questions.length; // 11
 
     if (a.type === 'MIDSEM') {
+      let bulkQuestionMarks = [];
+      if (hasApiData) {
+        try {
+          const uniqueClassIds = [...new Set(stds.map(s => s.classId).filter(Boolean))];
+          const results = await Promise.all(
+            uniqueClassIds.map(cId => fetchQuestionMarksByAssessmentAndClassApi(a.id, cId))
+          );
+          bulkQuestionMarks = results.flat();
+        } catch (err) {
+          console.warn('Failed bulk fetch of question marks', err);
+        }
+      }
+
+      const bulkQmMap = bulkQuestionMarks.reduce((acc, qm) => {
+        if (!acc[qm.markId]) acc[qm.markId] = [];
+        acc[qm.markId].push(qm);
+        return acc;
+      }, {});
+
       const rows = await Promise.all(
         stds.map(async (s) => {
           const mark = existingMarks.find((m) => m.studentId === s.id);
           if (mark) {
             let qms = getQuestionMarksForMark(mark.id);
             if (hasApiData) {
-              try {
-                qms = await fetchQuestionMarksByMarkApi(mark.id);
-              } catch {
-                // Keep local fallback question marks.
+              if (bulkQuestionMarks.length > 0) {
+                qms = bulkQmMap[mark.id] || [];
+              } else {
+                try {
+                  qms = await fetchQuestionMarksByMarkApi(mark.id);
+                } catch {
+                  // Keep local fallback question marks.
+                }
               }
             }
             const marks = template.questions.map((q, qi) => {
@@ -286,6 +311,7 @@ export default function MarkEntry() {
             const total = marks.reduce((sum, m) => sum + m, 0);
             return {
               studentId: s.id,
+              classId: s.classId,
               studentName: s.name,
               regNo: s.regNo || '',
               marks,
@@ -294,6 +320,7 @@ export default function MarkEntry() {
           }
           return {
             studentId: s.id,
+            classId: s.classId,
             studentName: s.name,
             regNo: s.regNo || '',
             marks: Array(numQ).fill(0),
@@ -423,52 +450,61 @@ export default function MarkEntry() {
             existingMarks.map((m) => [String(m.studentId), m])
           );
 
-          for (const row of midsemRows) {
+          const toCreate = [];
+          const toUpdate = [];
+
+          const rowsPayload = midsemRows.map(row => ({
+            studentId: row.studentId,
+            totalMarks: Number(row.total),
+          }));
+
+          rowsPayload.forEach((row) => {
             const existingMark = existingMarksByStudent.get(String(row.studentId));
-            const mark = existingMark
-              ? await updateMark(existingMark.id, {
-                  marksObtained: row.total,
-                })
-              : await createMark(assessment.id, {
-                  studentId: row.studentId,
-                  totalMarks: row.total,
-                });
+            if (existingMark) {
+              toUpdate.push({
+                markId: existingMark.id,
+                ...row,
+              });
+            } else {
+              toCreate.push(row);
+            }
+          });
 
-            const existingQuestionMarks = await fetchQuestionMarksByMarkApi(mark.id);
-            const existingQmByQuestion = new Map();
-            existingQuestionMarks.forEach((qm) => {
-              existingQmByQuestion.set(String(qm.questionNumber), qm);
-              const numericKey = Number(qm.questionNumber);
-              if (!Number.isNaN(numericKey)) {
-                existingQmByQuestion.set(String(numericKey), qm);
-              }
-            });
+          if (toCreate.length > 0) {
+            await createMarksBulk(assessment.id, toCreate);
+          }
 
+          if (toUpdate.length > 0) {
             await Promise.all(
-              midsemTemplate.questions.map((q, qi) => {
-                const score = row.marks[qi] ?? 0;
-                const backendQuestionNumber = qi + 1;
-                const existingQm =
-                  existingQmByQuestion.get(String(backendQuestionNumber)) ||
-                  existingQmByQuestion.get(String(q.questionNumber));
-
-                if (existingQm) {
-                  return updateQuestionMark(existingQm.id, {
-                    marksObtained: score,
-                    coNumber: q.coNumber,
-                    maxMarks: q.maxMarks
-                  });
-                }
-
-                return createQuestionMark(mark.id, {
-                  questionNumber: backendQuestionNumber,
-                  coNumber: q.coNumber,
-                  maxMarks: q.maxMarks,
-                  obtainedMarks: score,
-                });
-              })
+              toUpdate.map((row) =>
+                updateMark(row.markId, {
+                  marksObtained: row.totalMarks,
+                })
+              )
             );
           }
+
+          // Bulk save question marks mapped by classId
+          const uniqueClassIds = [...new Set(midsemRows.map(r => r.classId).filter(Boolean))];
+          const bulkSavePromises = uniqueClassIds.map(cId => {
+            const studentsInClass = midsemRows.filter(r => r.classId === cId);
+            const studentMarksRequest = studentsInClass.map(row => {
+              const questionMarks = midsemTemplate.questions.map((q, qi) => ({
+                questionNumber: qi + 1,
+                coNumber: q.coNumber,
+                maxMarks: q.maxMarks,
+                obtainedMarks: Number(row.marks[qi] ?? 0),
+              }));
+              return {
+                studentId: row.studentId,
+                questionMarks: questionMarks
+              };
+            });
+            return saveQuestionMarksBulkApi(assessment.id, cId, studentMarksRequest);
+          });
+          
+          await Promise.all(bulkSavePromises);
+          
           toast.success('Marks updated on server successfully!');
         } catch (apiErr) {
           // Fall back to local store

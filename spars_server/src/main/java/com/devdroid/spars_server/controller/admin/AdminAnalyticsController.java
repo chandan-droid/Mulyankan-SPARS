@@ -34,6 +34,18 @@ public class AdminAnalyticsController {
                 .build());
     }
 
+    @GetMapping("/class/{classId}/performance-distribution")
+    public ResponseEntity<ApiResponse<List<PerformanceDistributionDTO>>> getPerformanceDistribution(
+            @PathVariable Long classId,
+            @RequestParam(required = false) Long subjectId) {
+        List<PerformanceDistributionDTO> distribution = analyticsService.getPerformanceDistribution(classId, subjectId);
+        return ResponseEntity.ok(ApiResponse.<List<PerformanceDistributionDTO>>builder()
+                .success(true)
+                .message("Performance distribution for class fetched successfully")
+                .data(distribution)
+                .build());
+    }
+
     @GetMapping("/subject/{subjectId}/top-performers")
     public ResponseEntity<ApiResponse<List<StudentPerformanceDTO>>> getTopPerformers(
             @PathVariable Long subjectId,
@@ -46,6 +58,19 @@ public class AdminAnalyticsController {
                 .build());
     }
 
+    @GetMapping("/class/{classId}/top-performers")
+    public ResponseEntity<ApiResponse<List<StudentPerformanceDTO>>> getTopPerformers(
+            @PathVariable Long classId,
+            @RequestParam(required = false) Long subjectId,
+            @RequestParam(defaultValue = "5") int count) {
+        List<StudentPerformanceDTO> performers = analyticsService.getTopPerformers(classId, subjectId, count);
+        return ResponseEntity.ok(ApiResponse.<List<StudentPerformanceDTO>>builder()
+                .success(true)
+                .message("Top performers for class fetched successfully")
+                .data(performers)
+                .build());
+    }
+
     @GetMapping("/subject/{subjectId}/bottom-performers")
     public ResponseEntity<ApiResponse<List<StudentPerformanceDTO>>> getBottomPerformers(
             @PathVariable Long subjectId,
@@ -54,6 +79,19 @@ public class AdminAnalyticsController {
         return ResponseEntity.ok(ApiResponse.<List<StudentPerformanceDTO>>builder()
                 .success(true)
                 .message("Bottom performers fetched successfully")
+                .data(performers)
+                .build());
+    }
+
+    @GetMapping("/class/{classId}/bottom-performers")
+    public ResponseEntity<ApiResponse<List<StudentPerformanceDTO>>> getBottomPerformers(
+            @PathVariable Long classId,
+            @RequestParam(required = false) Long subjectId,
+            @RequestParam(defaultValue = "5") int count) {
+        List<StudentPerformanceDTO> performers = analyticsService.getBottomPerformers(classId, subjectId, count);
+        return ResponseEntity.ok(ApiResponse.<List<StudentPerformanceDTO>>builder()
+                .success(true)
+                .message("Bottom performers for class fetched successfully")
                 .data(performers)
                 .build());
     }
