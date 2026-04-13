@@ -149,6 +149,7 @@ public class TeacherQuestionMarkService {
     private QuestionMarkDTO toQuestionMarkDto(QuestionMark questionMark) {
         return QuestionMarkDTO.builder()
                 .id(questionMark.getId())
+                .studentId(questionMark.getMark().getStudent().getId())
                 .markId(questionMark.getMark().getId())
                 .questionNumber(questionMark.getQuestionNumber())
                 .coNumber(questionMark.getCoNumber())

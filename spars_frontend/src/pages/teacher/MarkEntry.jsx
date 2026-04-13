@@ -276,23 +276,26 @@ export default function MarkEntry() {
       }
 
       const bulkQmMap = bulkQuestionMarks.reduce((acc, qm) => {
-        if (!acc[qm.markId]) acc[qm.markId] = [];
-        acc[qm.markId].push(qm);
+        const key = String(qm.markId);
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(qm);
         return acc;
       }, {});
 
       const rows = await Promise.all(
         stds.map(async (s) => {
-          const mark = existingMarks.find((m) => m.studentId === s.id);
+          const matchedMarkId = String(s.id);
+          const mark = existingMarks.find((m) => String(m.studentId) === matchedMarkId);
           if (mark) {
             let qms = getQuestionMarksForMark(mark.id);
             if (hasApiData) {
-              if (bulkQuestionMarks.length > 0) {
-                qms = bulkQmMap[mark.id] || [];
+              const stringMarkId = String(mark.id);
+              if (bulkQuestionMarks.length > 0 && bulkQmMap[stringMarkId]) {
+                qms = bulkQmMap[stringMarkId] || [];
               } else {
                 try {
                   qms = await fetchQuestionMarksByMarkApi(mark.id);
-                } catch {
+                } catch (err) {
                   // Keep local fallback question marks.
                 }
               }
@@ -306,7 +309,7 @@ export default function MarkEntry() {
                   String(x.questionNumber) === String(q.questionNumber)
                 );
               });
-              return qm?.obtainedMarks ?? 0;
+              return qm?.obtainedMarks ?? (qm?.marksObtained ?? 0);
             });
             const total = marks.reduce((sum, m) => sum + m, 0);
             return {

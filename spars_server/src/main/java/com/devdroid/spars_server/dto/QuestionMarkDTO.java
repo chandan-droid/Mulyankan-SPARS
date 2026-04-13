@@ -13,6 +13,8 @@ public class QuestionMarkDTO {
 
     private Long id;
 
+    private Long studentId;
+
     private Long markId;
 
     private Integer questionNumber;

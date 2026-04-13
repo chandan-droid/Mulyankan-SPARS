@@ -8,6 +8,8 @@ import com.devdroid.spars_server.dto.TeacherQuestionMarkBulkUpsertRequest;
 import com.devdroid.spars_server.service.teacher.TeacherQuestionMarkService;
 import jakarta.validation.Valid;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -17,7 +19,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -73,27 +74,31 @@ public class TeacherQuestionMarkController {
     }
 
     @GetMapping("/assessment/{assessmentId}/class/{classId}")
-    public ResponseEntity<ApiResponse<List<QuestionMarkDTO>>> getQuestionMarksByAssessmentAndClass(
+    public ResponseEntity<ApiResponse<Map<Long, List<QuestionMarkDTO>>>> getQuestionMarksByAssessmentAndClass(
             @PathVariable Long assessmentId,
             @PathVariable Long classId) {
         List<QuestionMarkDTO> questionMarks = questionMarkService.getQuestionMarksByAssessmentAndClass(assessmentId, classId);
-        return ResponseEntity.ok(ApiResponse.<List<QuestionMarkDTO>>builder()
+        Map<Long, List<QuestionMarkDTO>> groupedByStudent = questionMarks.stream()
+                .collect(Collectors.groupingBy(QuestionMarkDTO::getStudentId));
+        return ResponseEntity.ok(ApiResponse.<Map<Long, List<QuestionMarkDTO>>>builder()
                 .success(true)
                 .message("Question marks fetched successfully for assessment and class")
-                .data(questionMarks)
+                .data(groupedByStudent)
                 .build());
     }
 
     @PostMapping("/assessment/{assessmentId}/class/{classId}/bulk")
-    public ResponseEntity<ApiResponse<List<QuestionMarkDTO>>> saveQuestionMarksByAssessmentAndClass(
+    public ResponseEntity<ApiResponse<Map<Long, List<QuestionMarkDTO>>>> saveQuestionMarksByAssessmentAndClass(
             @PathVariable Long assessmentId,
             @PathVariable Long classId,
             @Valid @RequestBody TeacherQuestionMarkBulkUpsertRequest request) {
         List<QuestionMarkDTO> savedQuestionMarks = questionMarkService.saveQuestionMarksByAssessmentAndClass(assessmentId, classId, request);
-        return ResponseEntity.ok(ApiResponse.<List<QuestionMarkDTO>>builder()
+        Map<Long, List<QuestionMarkDTO>> groupedByStudent = savedQuestionMarks.stream()
+                .collect(Collectors.groupingBy(QuestionMarkDTO::getStudentId));
+        return ResponseEntity.ok(ApiResponse.<Map<Long, List<QuestionMarkDTO>>>builder()
                 .success(true)
                 .message("Bulk question marks saved successfully")
-                .data(savedQuestionMarks)
+                .data(groupedByStudent)
                 .build());
     }
 }
