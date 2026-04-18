@@ -25,7 +25,21 @@ export function getQuestionMarksForMark() { return []; }
 export function saveQuestionMarks() {}
 export function getMidsemTemplate() { return null; }
 export function saveMidsemTemplate() {}
-export function buildDefaultMidsemQuestions() { return []; }
+export function buildDefaultMidsemQuestions() {
+  return [
+    { questionNumber: '1a', part: 'A', maxMarks: 1.0, coNumber: 1 },
+    { questionNumber: '1b', part: 'A', maxMarks: 1.0, coNumber: 2 },
+    { questionNumber: '1c', part: 'A', maxMarks: 1.0, coNumber: 3 },
+    { questionNumber: '1d', part: 'A', maxMarks: 1.0, coNumber: 3 },
+    { questionNumber: '1e', part: 'A', maxMarks: 1.0, coNumber: 4 },
+    { questionNumber: '2a', part: 'B', maxMarks: 2.5, coNumber: 1 },
+    { questionNumber: '2b', part: 'B', maxMarks: 2.5, coNumber: 2 },
+    { questionNumber: '2c', part: 'B', maxMarks: 2.5, coNumber: 1 },
+    { questionNumber: '2d', part: 'B', maxMarks: 2.5, coNumber: 3 },
+    { questionNumber: '2e', part: 'B', maxMarks: 2.5, coNumber: 5 },
+    { questionNumber: '2f', part: 'B', maxMarks: 2.5, coNumber: 1 }
+  ];
+}
 export function getStudentsForClass() { return []; }
 export function getMarksForStudent() { return []; }
 export function getClasses() { return []; }

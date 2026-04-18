@@ -8,4 +8,6 @@ public class MarkUpdateRequest {
 
     @NotNull(message = "Marks obtained are required")
     private Double marksObtained;
+
+    private Long studentId;
 }

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback } from 'react';
 import { changePasswordRequest, loginRequest } from '@/lib/authApi';
+import { cacheClearAll } from '@/lib/cacheManager';
 
 const USER_STORAGE_KEY = 'edutrack_user';
 const TOKEN_STORAGE_KEY = 'edutrack_token';
@@ -50,6 +51,7 @@ export function AuthProvider({ children }) {
     setToken(null);
     sessionStorage.removeItem(USER_STORAGE_KEY);
     sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    cacheClearAll();
   }, []);
 
   return (

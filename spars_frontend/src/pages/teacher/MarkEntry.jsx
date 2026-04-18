@@ -20,7 +20,6 @@ import {
 import {
   getMyAssignments,
   getMyAssessments,
-  createMarksBulk,
   createMark,
   updateMark,
   createQuestionMark,
@@ -94,8 +93,10 @@ export default function MarkEntry() {
         setApiAssignments(Array.isArray(assignmentData) ? assignmentData : []);
         setApiAssessments(Array.isArray(assessmentData) ? assessmentData : []);
         setHasApiData(true);
-      } catch {
+        console.log('✓ Initial API data loaded successfully');
+      } catch (err) {
         if (cancelled) return;
+        console.warn('⚠ Initial API load failed:', err);
         setHasApiData(false);
       } finally {
         if (!cancelled) setIsInitializing(false);
@@ -248,9 +249,16 @@ export default function MarkEntry() {
           fetchStudentsByClassApi(a.classId),
         ]);
 
-        if (Array.isArray(apiMarks)) existingMarks = apiMarks;
-        if (Array.isArray(apiStudents)) stds = apiStudents;
+        if (Array.isArray(apiMarks)) {
+          existingMarks = apiMarks;
+          console.log('✓ Fetched marks from API:', existingMarks);
+        }
+        if (Array.isArray(apiStudents)) {
+          stds = apiStudents;
+          console.log('✓ Fetched students from API:', stds);
+        }
       } catch (err) {
+        console.warn('⚠ Failed to load API marks. Using local data:', err?.message);
         setApiError(err?.message || 'Failed to load API marks. Using local data.');
       }
     }
@@ -290,15 +298,7 @@ export default function MarkEntry() {
             let qms = getQuestionMarksForMark(mark.id);
             if (hasApiData) {
               const stringMarkId = String(mark.id);
-              if (bulkQuestionMarks.length > 0 && bulkQmMap[stringMarkId]) {
-                qms = bulkQmMap[stringMarkId] || [];
-              } else {
-                try {
-                  qms = await fetchQuestionMarksByMarkApi(mark.id);
-                } catch (err) {
-                  // Keep local fallback question marks.
-                }
-              }
+              qms = bulkQmMap[stringMarkId] || [];
             }
             const marks = template.questions.map((q, qi) => {
               const backendQuestionNumber = qi + 1;
@@ -333,26 +333,66 @@ export default function MarkEntry() {
       );
       setMidsemRows(rows);
     } else {
-      setSimpleRows(
-        stds.map((s) => {
-          const mark = existingMarks.find((m) => m.studentId === s.id);
-          const row = {
-            studentId: s.id,
-            studentName: s.name,
-            regNo: s.regNo || '',
-            marks: mark?.totalMarks ?? mark?.marksObtained ?? 0,
-            attendedClasses: mark?.attendedClasses ?? 0,
-          };
-          return row;
-        })
-      );
+      // ============ FIXED: SIMPLE ASSESSMENTS (QUIZ, ASSIGNMENT, ATTENDANCE) ============
+      const processedRows = stds.map((s) => {
+        // FIX #1: STRING COERCION - Convert both IDs to strings for reliable comparison
+        const studentIdStr = String(s.id);
+        const mark = existingMarks.find((m) => String(m.studentId) === studentIdStr);
+
+        const resolvedMarks =
+          mark?.totalMarks ??
+          mark?.marksObtained ??
+          mark?.quizMarks ??
+          mark?.assignmentMarks ??
+          0;
+
+        // FIX #2: Initialize all required fields
+        const row = {
+          studentId: s.id,
+          studentName: s.name,
+          regNo: s.regNo || '',
+          marks: resolvedMarks,
+          attendedClasses: mark?.attendedClasses ?? 0,
+          quizMarks: mark?.quizMarks ?? resolvedMarks,
+        };
+
+        // FIX #3: ATTENDANCE-SPECIFIC HANDLING
+        if (a.type === 'ATTENDANCE') {
+          const total = a.totalClasses || 40;
+          const attended = mark?.attendedClasses;
+          if (attended !== undefined && attended !== null) {
+            row.attendedClasses = attended;
+            // Recalculate marks when attendance count exists.
+            row.marks = (attended / total) >= 0.75 ? 5 : 0;
+          } else {
+            // Preserve fetched marks when only final score is available from API.
+            row.attendedClasses = 0;
+            row.marks = resolvedMarks;
+          }
+        }
+
+        console.log(`✓ Processed student ${studentIdStr} (${s.name}):`, {
+          found: !!mark,
+          marksValue: row.marks,
+          attendedValue: row.attendedClasses,
+          assessmentType: a.type
+        });
+
+        return row;
+      });
+
+      setSimpleRows(processedRows);
+      console.log('✓ All simple rows processed:', processedRows);
     }
   }, [hasApiData]);
 
   const handleSelectAssessment = (id) => {
     setSelectedId(id);
     const a = myAssessments.find((x) => x.id === id);
-    if (a) loadMarks(a);
+    if (a) {
+      console.log('📋 Loading marks for assessment:', a);
+      loadMarks(a);
+    }
   };
 
   const updateMidsemMark = (rowIdx, qIdx, value) => {
@@ -381,10 +421,12 @@ export default function MarkEntry() {
       }
       if (field === 'quizMarks') {
         row.quizMarks = value;
+        row.marks = value; // Keep marks in sync with quizMarks
       }
       if (field === 'attendedClasses') {
         const total = assessment?.totalClasses || 40;
         row.attendedClasses = Math.min(Math.max(0, value), total);
+        // FIX: Auto-calculate marks: >= 75% attendance = 5, else = 0
         row.marks = (row.attendedClasses / total) >= 0.75 ? 5 : 0;
       }
       rows[idx] = row;
@@ -449,43 +491,22 @@ export default function MarkEntry() {
         // Try backend API first
         try {
           const existingMarks = await fetchMarksByAssessmentApi(assessment.id);
-          const existingMarksByStudent = new Map(
-            existingMarks.map((m) => [String(m.studentId), m])
+          const existingByStudent = new Map(
+            existingMarks.map((mark) => [String(mark.studentId), mark])
           );
 
-          const toCreate = [];
-          const toUpdate = [];
-
-          const rowsPayload = midsemRows.map(row => ({
-            studentId: row.studentId,
-            totalMarks: Number(row.total),
-          }));
-
-          rowsPayload.forEach((row) => {
-            const existingMark = existingMarksByStudent.get(String(row.studentId));
-            if (existingMark) {
-              toUpdate.push({
-                markId: existingMark.id,
-                ...row,
+          await Promise.all(
+            midsemRows.map((row) => {
+              const existing = existingByStudent.get(String(row.studentId));
+              if (existing) {
+                return updateMark(existing.id, { marksObtained: Number(row.total) });
+              }
+              return createMark(assessment.id, {
+                studentId: row.studentId,
+                totalMarks: Number(row.total),
               });
-            } else {
-              toCreate.push(row);
-            }
-          });
-
-          if (toCreate.length > 0) {
-            await createMarksBulk(assessment.id, toCreate);
-          }
-
-          if (toUpdate.length > 0) {
-            await Promise.all(
-              toUpdate.map((row) =>
-                updateMark(row.markId, {
-                  marksObtained: row.totalMarks,
-                })
-              )
-            );
-          }
+            })
+          );
 
           // Bulk save question marks mapped by classId
           const uniqueClassIds = [...new Set(midsemRows.map(r => r.classId).filter(Boolean))];
@@ -533,47 +554,44 @@ export default function MarkEntry() {
           toast.success('Marks saved locally (server unavailable).');
         }
       } else {
-        const rowsPayload = simpleRows.map(row => ({
-          studentId: row.studentId,
-          totalMarks: Number(row.marks),
-        }));
-
         try {
           const existingMarks = await fetchMarksByAssessmentApi(assessment.id);
-          const existingMarksByStudent = new Map(
-            existingMarks.map((m) => [String(m.studentId), m])
+          const existingByStudent = new Map(
+            existingMarks.map((mark) => [String(mark.studentId), mark])
           );
 
-          const toCreate = [];
-          const toUpdate = [];
+          await Promise.all(
+            simpleRows.map((row) => {
+              const markPayload = {
+                marksObtained: Number(row.marks),
+              };
 
-          rowsPayload.forEach((row) => {
-            const existingMark = existingMarksByStudent.get(String(row.studentId));
-            if (existingMark) {
-              toUpdate.push({
-                markId: existingMark.id,
-                ...row,
+              if (assessment.type === 'ATTENDANCE') {
+                markPayload.attendedClasses = Number(row.attendedClasses ?? 0);
+              }
+              if (assessment.type === 'QUIZ') {
+                markPayload.quizMarks = Number(row.marks ?? 0);
+              }
+
+              const existing = existingByStudent.get(String(row.studentId));
+              if (existing) {
+                return updateMark(existing.id, markPayload);
+              }
+
+              return createMark(assessment.id, {
+                studentId: row.studentId,
+                totalMarks: Number(row.marks),
+                ...(assessment.type === 'ATTENDANCE'
+                  ? { attendedClasses: Number(row.attendedClasses ?? 0) }
+                  : {}),
+                ...(assessment.type === 'QUIZ'
+                  ? { quizMarks: Number(row.marks ?? 0) }
+                  : {}),
               });
-            } else {
-              toCreate.push(row);
-            }
-          });
+            })
+          );
 
-          if (toCreate.length > 0) {
-            await createMarksBulk(assessment.id, toCreate);
-          }
-
-          if (toUpdate.length > 0) {
-            await Promise.all(
-              toUpdate.map((row) =>
-                updateMark(row.markId, {
-                  marksObtained: row.totalMarks,
-                })
-              )
-            );
-          }
-
-          toast.success(`Marks synced to server (${rowsPayload.length} records)`);
+          toast.success(`Marks synced to server (${simpleRows.length} records)`);
         } catch (apiErr) {
           console.warn('API save failed, using local store:', apiErr.message);
           for (const row of simpleRows) {
@@ -1120,7 +1138,7 @@ export default function MarkEntry() {
         </div>
       </div>
 
-      {/* Edit CO Mapping Dialog Logic from before remains identically functioning under this markup */}
+      {/* Edit CO Mapping Dialog */}
       <Dialog open={openCO} onOpenChange={setOpenCO}>
         <DialogContent className="rounded-3xl max-w-sm p-0 overflow-hidden border-border/40 shadow-2xl">
           <div className="h-2 w-full stat-gradient-blue" />

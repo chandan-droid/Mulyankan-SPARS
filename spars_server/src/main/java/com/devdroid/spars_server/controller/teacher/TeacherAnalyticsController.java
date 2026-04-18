@@ -2,8 +2,12 @@ package com.devdroid.spars_server.controller.teacher;
 
 import com.devdroid.spars_server.dto.ApiResponse;
 import com.devdroid.spars_server.dto.analytics.CoAttainmentComparisonDTO;
+import com.devdroid.spars_server.dto.analytics.OverallPerformanceDTO;
 import com.devdroid.spars_server.dto.analytics.PerformanceDistributionDTO;
+import com.devdroid.spars_server.dto.analytics.ReportFileDTO;
 import com.devdroid.spars_server.dto.analytics.StudentPerformanceDTO;
+import com.devdroid.spars_server.dto.analytics.StudentRiskBandDTO;
+import com.devdroid.spars_server.dto.analytics.TrendPointDTO;
 import com.devdroid.spars_server.service.AnalyticsService;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -66,6 +70,65 @@ public class TeacherAnalyticsController {
                 .success(true)
                 .message("CO attainment comparison fetched successfully")
                 .data(comparison)
+                .build());
+    }
+
+    @GetMapping("/class/{classId}/overview")
+    public ResponseEntity<ApiResponse<OverallPerformanceDTO>> getClassOverview(
+            @PathVariable Long classId,
+            @RequestParam(required = false) Long subjectId) {
+        return ResponseEntity.ok(ApiResponse.<OverallPerformanceDTO>builder()
+                .success(true)
+                .message("Class performance overview fetched successfully")
+                .data(analyticsService.getClassOverview(classId, subjectId))
+                .build());
+    }
+
+    @GetMapping("/class/{classId}/top-students")
+    public ResponseEntity<ApiResponse<List<StudentRiskBandDTO>>> getTopStudents(
+            @PathVariable Long classId,
+            @RequestParam(required = false) Long subjectId,
+            @RequestParam(defaultValue = "5") int count) {
+        return ResponseEntity.ok(ApiResponse.<List<StudentRiskBandDTO>>builder()
+                .success(true)
+                .message("Top class students fetched successfully")
+                .data(analyticsService.getTeacherTopStudents(classId, subjectId, count))
+                .build());
+    }
+
+    @GetMapping("/class/{classId}/weak-students")
+    public ResponseEntity<ApiResponse<List<StudentRiskBandDTO>>> getWeakStudents(
+            @PathVariable Long classId,
+            @RequestParam(required = false) Long subjectId,
+            @RequestParam(defaultValue = "40") double threshold) {
+        return ResponseEntity.ok(ApiResponse.<List<StudentRiskBandDTO>>builder()
+                .success(true)
+                .message("Weak class students fetched successfully")
+                .data(analyticsService.getTeacherWeakStudents(classId, subjectId, threshold))
+                .build());
+    }
+
+    @GetMapping("/class/{classId}/trends")
+    public ResponseEntity<ApiResponse<List<TrendPointDTO>>> getTrends(
+            @PathVariable Long classId,
+            @RequestParam(required = false) Long subjectId) {
+        return ResponseEntity.ok(ApiResponse.<List<TrendPointDTO>>builder()
+                .success(true)
+                .message("Class performance trends fetched successfully")
+                .data(analyticsService.getTeacherPerformanceTrends(classId, subjectId))
+                .build());
+    }
+
+    @GetMapping("/class/{classId}/reports/generate")
+    public ResponseEntity<ApiResponse<ReportFileDTO>> generateReport(
+            @PathVariable Long classId,
+            @RequestParam(required = false) Long subjectId,
+            @RequestParam String reportType,
+            @RequestParam(defaultValue = "PDF") String format) {
+        return ResponseEntity.ok(ApiResponse.<ReportFileDTO>builder()
+                .success(true)
+                .message("Teacher report generated successfully")
+                .data(analyticsService.generateTeacherReport(classId, subjectId, reportType, format))
                 .build());
     }
 }

@@ -1,6 +1,7 @@
 package com.devdroid.spars_server.service.teacher;
 
 import com.devdroid.spars_server.dto.BulkMarkCreateRequest;
+import com.devdroid.spars_server.dto.BulkMarkUpdateRequest;
 import com.devdroid.spars_server.dto.MarkCreateRequest;
 import com.devdroid.spars_server.dto.MarkDTO;
 import com.devdroid.spars_server.dto.MarkUpdateRequest;
@@ -194,6 +195,48 @@ public class TeacherMarkService {
         return markRepository.findByAssessmentId(assessmentId).stream()
                 .map(this::toMarkDto)
                 .toList();
+    }
+
+    @Transactional
+    public List<MarkDTO> updateMarksForAssessmentBulk(Long assessmentId, BulkMarkUpdateRequest request) {
+        // Validate assessment exists first
+        Assessment assessment = assessmentRepository.findById(assessmentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Assessment not found with id: " + assessmentId));
+
+        List<MarkDTO> updatedMarks = new ArrayList<>();
+
+        for (MarkUpdateRequest markRequest : request.getMarks()) {
+            try {
+                // Validate student belongs to class
+                Student student = studentRepository.findById(markRequest.getStudentId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Student not found with id: " + markRequest.getStudentId()));
+
+                if (!student.getAcademicClass().getId().equals(assessment.getAcademicClass().getId())) {
+                    System.err.println("Skipped mark for student " + markRequest.getStudentId() +
+                            ": Student does not belong to assessment's class");
+                    continue;
+                }
+
+                // Find existing mark
+                Mark existingMark = markRepository.findByStudentIdAndAssessmentId(markRequest.getStudentId(), assessmentId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Mark not found for student " + markRequest.getStudentId() +
+                                " and assessment " + assessmentId));
+
+                // Validate totalMarks
+                if (markRequest.getMarksObtained() > assessment.getMaxMarks()) {
+                    System.err.println("Skipped mark for student " + markRequest.getStudentId() +
+                            ": totalMarks exceeds assessment maxMarks");
+                    continue;
+                }
+
+                existingMark.setTotalMarks(markRequest.getMarksObtained());
+                updatedMarks.add(toMarkDto(markRepository.save(existingMark)));
+            } catch (ResourceNotFoundException ex) {
+                System.err.println("Skipped mark for student " + markRequest.getStudentId() + ": " + ex.getMessage());
+            }
+        }
+
+        return updatedMarks;
     }
 
     private MarkDTO toMarkDto(Mark mark) {

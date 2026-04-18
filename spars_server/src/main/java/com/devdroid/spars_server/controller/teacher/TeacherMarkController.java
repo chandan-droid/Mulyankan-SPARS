@@ -2,6 +2,7 @@ package com.devdroid.spars_server.controller.teacher;
 
 import com.devdroid.spars_server.dto.ApiResponse;
 import com.devdroid.spars_server.dto.BulkMarkCreateRequest;
+import com.devdroid.spars_server.dto.BulkMarkUpdateRequest;
 import com.devdroid.spars_server.dto.MarkCreateRequest;
 import com.devdroid.spars_server.dto.MarkDTO;
 import com.devdroid.spars_server.dto.MarkUpdateRequest;
@@ -61,6 +62,18 @@ public class TeacherMarkController {
                 .success(true)
                 .message("Mark updated successfully")
                 .data(mark)
+                .build());
+    }
+
+    @PutMapping("/assessment/{assessmentId}/bulk")
+    public ResponseEntity<ApiResponse<List<MarkDTO>>> updateMarksForAssessmentBulk(
+            @PathVariable Long assessmentId,
+            @Valid @RequestBody BulkMarkUpdateRequest request) {
+        List<MarkDTO> marks = markService.updateMarksForAssessmentBulk(assessmentId, request);
+        return ResponseEntity.ok(ApiResponse.<List<MarkDTO>>builder()
+                .success(true)
+                .message("Marks updated successfully. Total: " + marks.size())
+                .data(marks)
                 .build());
     }
 

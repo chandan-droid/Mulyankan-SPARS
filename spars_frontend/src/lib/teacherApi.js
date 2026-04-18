@@ -1,3 +1,5 @@
+import { cacheGet, cacheSet, cacheInvalidate } from './cacheManager';
+
 /**
  * teacherApi.js
  * API service layer for all teacher-side backend endpoints.
@@ -65,13 +67,67 @@ async function parseResponse(response, fallback) {
   return payload?.data ?? payload;
 }
 
-async function request(path, { method = 'GET', body, query, fallback } = {}) {
-  const response = await fetch(buildUrl(path, query), {
+/** Track in-flight background refreshes to avoid duplicate fetches */
+const _bgRefreshes = new Map();
+
+/** Cross-resource cache invalidation mapping */
+const CROSS_INVALIDATIONS = {
+  'teacher-assignments': ['/api/teacher/classrooms'],
+  marks: ['/co-attainment'],
+  'question-marks': ['/co-attainment'],
+  assessments: ['/api/teacher/grades'],
+  grades: ['/api/admin/assessments'],
+  classes: ['/api/teacher/classrooms'],
+};
+
+async function request(path, { method = 'GET', body, query, fallback, fresh = false } = {}) {
+  const fullUrl = buildUrl(path, query);
+
+  /* ── GET: cache-first with background revalidation ─────────────────── */
+  if (method === 'GET') {
+    const cached = cacheGet(fullUrl);
+
+    if (!fresh && cached !== null) {
+      // Serve stale data instantly; refresh cache in background
+      if (!_bgRefreshes.has(fullUrl)) {
+        const refresh = fetch(fullUrl, { method: 'GET', headers: getAuthHeaders() })
+          .then((res) => parseResponse(res, fallback || `GET ${path} failed`))
+          .then((freshData) => cacheSet(fullUrl, freshData))
+          .catch(() => {}) // silently swallow – cached data is still valid
+          .finally(() => _bgRefreshes.delete(fullUrl));
+        _bgRefreshes.set(fullUrl, refresh);
+      }
+      return cached;
+    }
+
+    // No cache → fetch from network, cache the result
+    const response = await fetch(fullUrl, { method: 'GET', headers: getAuthHeaders() });
+    const data = await parseResponse(response, fallback || `GET ${path} failed`);
+    cacheSet(fullUrl, data);
+    return data;
+  }
+
+  /* ── Mutations (POST / PUT / DELETE): execute then invalidate ───────── */
+  const response = await fetch(fullUrl, {
     method,
     headers: getAuthHeaders(),
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
-  return parseResponse(response, fallback || `${method} ${path} failed`);
+  const data = await parseResponse(response, fallback || `${method} ${path} failed`);
+
+  // Intelligent cache invalidation based on the resource path
+  const resourceMatch = path.match(/^\/api\/(?:teacher|admin)\/([^/]+)/);
+  if (resourceMatch) {
+    const resource = resourceMatch[1];
+    cacheInvalidate(`/api/teacher/${resource}`);
+    cacheInvalidate(`/api/admin/${resource}`);
+    const extras = CROSS_INVALIDATIONS[resource];
+    if (extras) {
+      extras.forEach((p) => cacheInvalidate(p));
+    }
+  }
+
+  return data;
 }
 
 /* ── normalizers ─────────────────────────────────────────────────────────── */
@@ -127,13 +183,24 @@ function normalizeAssessment(item) {
  * Backend:  { id, studentId, assessmentId, totalMarks|marksObtained, comments, createdAt }
  */
 function normalizeMark(item) {
-  const marksValue = item.marksObtained ?? item.totalMarks;
+  const marksValue =
+    item.totalMarks ??
+    item.marksObtained ??
+    item.quizMarks ??
+    item.assignmentMarks ??
+    item.obtainedMarks ??
+    0;
   return {
     id: item.id,
     studentId: item.studentId,
     assessmentId: item.assessmentId,
+    subjectId: item.subjectId ?? null,
+    assessmentType: item.assessmentType ?? item.type ?? null,
     totalMarks: marksValue,
     marksObtained: marksValue,
+    attendedClasses: item.attendedClasses ?? 0,
+    quizMarks: item.quizMarks ?? null,
+    quizScores: item.quizScores ?? null,
     comments: item.comments ?? null,
     createdAt: item.createdAt ?? null,
   };
@@ -234,6 +301,12 @@ export async function createMark(assessmentId, markData) {
       assessmentId: Number(assessmentId),
       studentId: Number(markData.studentId),
       totalMarks: Number(markData.totalMarks),
+      ...(markData.attendedClasses !== undefined
+        ? { attendedClasses: Number(markData.attendedClasses) }
+        : {}),
+      ...(markData.quizMarks !== undefined
+        ? { quizMarks: Number(markData.quizMarks) }
+        : {}),
     },
     fallback: 'Failed to create mark',
   });
@@ -261,6 +334,14 @@ export async function updateMark(markId, markData) {
     payload.comments = markData.comments;
   }
 
+  if (markData.attendedClasses !== undefined) {
+    payload.attendedClasses = Number(markData.attendedClasses);
+  }
+
+  if (markData.quizMarks !== undefined) {
+    payload.quizMarks = Number(markData.quizMarks);
+  }
+
   const data = await request(`/api/teacher/marks/${markId}`, {
     method: 'PUT',
     body: payload,
@@ -283,6 +364,12 @@ export async function createMarksBulk(assessmentId, marks) {
         assessmentId: Number(assessmentId),
         studentId: Number(m.studentId),
         totalMarks: Number(m.totalMarks),
+        ...(m.attendedClasses !== undefined
+          ? { attendedClasses: Number(m.attendedClasses) }
+          : {}),
+        ...(m.quizMarks !== undefined
+          ? { quizMarks: Number(m.quizMarks) }
+          : {}),
       })),
     },
     fallback: 'Failed to create marks in bulk',
@@ -297,6 +384,7 @@ export async function createMarksBulk(assessmentId, marks) {
  */
 export async function getMarksByAssessment(assessmentId) {
   const data = await request(`/api/teacher/marks/assessment/${assessmentId}`, {
+    fresh: true,
     fallback: `Failed to fetch marks for assessment ${assessmentId}`,
   });
   return Array.isArray(data) ? data.map(normalizeMark) : [];
@@ -423,6 +511,7 @@ export async function updateQuestionMark(questionMarkId, qmData) {
  */
 export async function getQuestionMarksByMark(markId) {
   const data = await request(`/api/teacher/question-marks/mark/${markId}`, {
+    fresh: true,
     fallback: `Failed to fetch question marks for mark ${markId}`,
   });
   return Array.isArray(data) ? data.map(normalizeQuestionMark) : [];
@@ -448,9 +537,17 @@ export async function getQuestionMarkDetail(questionMarkId) {
  */
 export async function getQuestionMarksByAssessmentAndClass(assessmentId, classId) {
   const data = await request(`/api/teacher/question-marks/assessment/${assessmentId}/class/${classId}`, {
+    fresh: true,
     fallback: `Failed to fetch question marks for assessment ${assessmentId} and class ${classId}`,
   });
-  return Array.isArray(data) ? data.map(normalizeQuestionMark) : [];
+  
+  if (Array.isArray(data)) {
+    return data.map(normalizeQuestionMark);
+  }
+  if (data && typeof data === 'object') {
+    return Object.values(data).flat().map(normalizeQuestionMark);
+  }
+  return [];
 }
 
 /**
@@ -466,7 +563,14 @@ export async function saveQuestionMarksByAssessmentAndClass(assessmentId, classI
     body: { studentMarks },
     fallback: `Failed to bulk save question marks for assessment ${assessmentId} and class ${classId}`,
   });
-  return Array.isArray(data) ? data.map(normalizeQuestionMark) : [];
+  
+  if (Array.isArray(data)) {
+    return data.map(normalizeQuestionMark);
+  }
+  if (data && typeof data === 'object') {
+    return Object.values(data).flat().map(normalizeQuestionMark);
+  }
+  return [];
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -493,6 +597,7 @@ export async function searchStudents({ search, classId } = {}) {
  */
 export async function getStudentsByClass(classId) {
   const data = await request(`/api/teacher/students/class/${classId}`, {
+    fresh: true,
     fallback: `Failed to fetch students for class ${classId}`,
   });
   return Array.isArray(data) ? data.map(normalizeStudent) : [];

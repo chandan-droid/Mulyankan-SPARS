@@ -18,6 +18,7 @@ import {
   getStudentsByClass,
   getMarksByAssessment,
   getQuestionMarksByMark,
+  getQuestionMarksByAssessmentAndClass,
 } from '@/lib/teacherApi';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -201,9 +202,18 @@ export default function TeacherReports() {
           .filter((mark) => midsemAssessments.has(String(mark.assessmentId)))
           .map((mark) => mark.id);
 
-        const qmsSettled = await Promise.allSettled(
-          midsemMarkIds.map((markId) => getQuestionMarksByMark(markId))
-        );
+        let qmsSettled = [];
+        if (currentAssignment.classId != null) {
+          qmsSettled = await Promise.allSettled(
+            Array.from(midsemAssessments).map((assessmentId) => 
+               getQuestionMarksByAssessmentAndClass(assessmentId, currentAssignment.classId)
+            )
+          );
+        } else {
+          qmsSettled = await Promise.allSettled(
+            midsemMarkIds.map((markId) => getQuestionMarksByMark(markId))
+          );
+        }
         const classQuestionMarks = qmsSettled
           .filter((result) => result.status === 'fulfilled')
           .flatMap((result) => result.value);

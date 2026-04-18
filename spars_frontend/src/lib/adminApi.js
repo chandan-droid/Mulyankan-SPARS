@@ -1,3 +1,5 @@
+import { cacheGet, cacheSet, cacheInvalidate } from './cacheManager';
+
 const API_BASE = (
   import.meta.env.VITE_API_BASE_URL || 'https://mulyankan-spars.onrender.com'
 ).replace(/\/$/, '');
@@ -41,14 +43,68 @@ async function parseResponse(response, fallbackMessage) {
   return payload?.data ?? payload;
 }
 
+/** Track in-flight background refreshes to avoid duplicate fetches */
+const _bgRefreshes = new Map();
+
+/** Cross-resource cache invalidation mapping */
+const CROSS_INVALIDATIONS = {
+  'teacher-assignments': ['/api/teacher/classrooms'],
+  marks: ['/co-attainment'],
+  'question-marks': ['/co-attainment'],
+  assessments: ['/api/teacher/grades'],
+  grades: ['/api/admin/assessments'],
+  classes: ['/api/teacher/classrooms'],
+  students: ['/api/teacher/students'],
+};
+
 async function request(path, { method = 'GET', body, query, fallbackMessage }) {
-  const response = await fetch(buildUrl(path, query), {
+  const fullUrl = buildUrl(path, query);
+
+  /* ── GET: cache-first with background revalidation ─────────────────── */
+  if (method === 'GET') {
+    const cached = cacheGet(fullUrl);
+
+    if (cached !== null) {
+      // Serve stale data instantly; refresh cache in background
+      if (!_bgRefreshes.has(fullUrl)) {
+        const refresh = fetch(fullUrl, { method: 'GET', headers: getAuthHeaders() })
+          .then((res) => parseResponse(res, fallbackMessage))
+          .then((freshData) => cacheSet(fullUrl, freshData))
+          .catch(() => {}) // silently swallow – cached data is still valid
+          .finally(() => _bgRefreshes.delete(fullUrl));
+        _bgRefreshes.set(fullUrl, refresh);
+      }
+      return cached;
+    }
+
+    // No cache → fetch from network, cache the result
+    const response = await fetch(fullUrl, { method: 'GET', headers: getAuthHeaders() });
+    const data = await parseResponse(response, fallbackMessage);
+    cacheSet(fullUrl, data);
+    return data;
+  }
+
+  /* ── Mutations (POST / PUT / DELETE): execute then invalidate ───────── */
+  const response = await fetch(fullUrl, {
     method,
     headers: getAuthHeaders(),
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
+  const data = await parseResponse(response, fallbackMessage);
 
-  return parseResponse(response, fallbackMessage);
+  // Intelligent cache invalidation based on the resource path
+  const resourceMatch = path.match(/^\/api\/(?:teacher|admin)\/([^/]+)/);
+  if (resourceMatch) {
+    const resource = resourceMatch[1];
+    cacheInvalidate(`/api/teacher/${resource}`);
+    cacheInvalidate(`/api/admin/${resource}`);
+    const extras = CROSS_INVALIDATIONS[resource];
+    if (extras) {
+      extras.forEach((p) => cacheInvalidate(p));
+    }
+  }
+
+  return data;
 }
 
 function mapClassFromApi(item) {
