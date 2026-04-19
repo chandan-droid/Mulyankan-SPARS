@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   getMyAssignments,
   getMyAssessments,
+  getClassById,
   getStudentsByClass,
   getMarksByAssessment,
   getQuestionMarksByMark,
@@ -64,6 +65,7 @@ export default function TeacherReports() {
   const [apiClassStudents, setApiClassStudents] = useState([]);
   const [apiClassMarks, setApiClassMarks] = useState([]);
   const [apiClassQuestionMarks, setApiClassQuestionMarks] = useState([]);
+  const [apiClassDetails, setApiClassDetails] = useState(null);
   const [classDataLoaded, setClassDataLoaded] = useState(false);
   const [loadingAssignments, setLoadingAssignments] = useState(true);
   const [loadingClassData, setLoadingClassData] = useState(false);
@@ -161,6 +163,7 @@ export default function TeacherReports() {
     const loadClassScopedData = async () => {
       if (!currentAssignment) {
         setClassDataLoaded(false);
+        setApiClassDetails(null);
         setApiClassStudents([]);
         setApiClassMarks([]);
         setApiClassQuestionMarks([]);
@@ -177,8 +180,10 @@ export default function TeacherReports() {
       setClassDataLoaded(false);
 
       try {
+        let classDetails = null;
         let classStudents = [];
         if (currentAssignmentClassId != null) {
+          classDetails = await getClassById(currentAssignmentClassId);
           classStudents = await getStudentsByClass(currentAssignmentClassId);
         } else {
           classStudents = allStudents.filter((student) =>
@@ -225,12 +230,14 @@ export default function TeacherReports() {
           .flatMap((result) => result.value);
 
         if (cancelled) return;
+        setApiClassDetails(classDetails);
         setApiClassStudents(classStudents);
         setApiClassMarks(classMarks);
         setApiClassQuestionMarks(classQuestionMarks);
         setClassDataLoaded(true);
       } catch {
         if (cancelled) return;
+        setApiClassDetails(null);
         setClassDataLoaded(false);
       } finally {
         if (!cancelled) setLoadingClassData(false);
@@ -253,6 +260,18 @@ export default function TeacherReports() {
   const subjectInfo = useMemo(() => {
     return allSubjects.find((s) => String(s.id) === String(selectedSubject));
   }, [selectedSubject, allSubjects]);
+
+  const currentClassInfo = useMemo(() => {
+    const classDetails = apiClassDetails ?? {};
+    return {
+      branch: classDetails.branch ?? currentAssignment?.branch ?? '',
+      semester: classDetails.semester ?? currentAssignment?.semester ?? '',
+      section: classDetails.section ?? currentAssignment?.section ?? '',
+      academicYear: classDetails.academicYear ?? classDetails.academic_year ?? currentAssignment?.academic_year ?? '',
+      studentCount: Number(classDetails.studentCount ?? apiClassStudents.length ?? 0),
+      subjects: Array.isArray(classDetails.subjects) ? classDetails.subjects : [],
+    };
+  }, [apiClassDetails, currentAssignment, apiClassStudents.length]);
 
   const relevantStudents = useMemo(() => {
     if (!currentAssignment) return [];
@@ -362,9 +381,9 @@ export default function TeacherReports() {
                reportData={reportData}
                selectedSubject={selectedSubject}
                relevantStudents={relevantStudents}
-               branch={currentAssignment?.branch}
-               semester={currentAssignment?.semester}
-               section={currentAssignment?.section}
+              branch={currentClassInfo.branch}
+              semester={currentClassInfo.semester}
+              section={currentClassInfo.section}
              />
            ) : (
              <div className="text-center py-24 text-muted-foreground"><BookOpen className="h-10 w-10 mx-auto mb-3 opacity-20" />Select a Class/Subject above to view reports.</div>
@@ -390,9 +409,9 @@ export default function TeacherReports() {
                reportData={reportData}
                selectedSubject={selectedSubject}
                relevantStudents={relevantStudents}
-               branch={currentAssignment?.branch}
-               semester={currentAssignment?.semester}
-               section={currentAssignment?.section}
+              branch={currentClassInfo.branch}
+              semester={currentClassInfo.semester}
+              section={currentClassInfo.section}
                classId={currentAssignment?.classId}
              />
            ) : (

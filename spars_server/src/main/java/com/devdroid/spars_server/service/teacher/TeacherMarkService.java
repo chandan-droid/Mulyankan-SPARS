@@ -65,14 +65,14 @@ public class TeacherMarkService {
     }
 
     @Transactional
-    public List<MarkDTO> updateMarksForAssessmentBulk(Long assessmentId, BulkMarkUpdateRequest request) {
+    public List<MarkDTO> createMarksForAssessmentBulk(Long assessmentId, BulkMarkCreateRequest request) {
         // Validate assessment exists first
         Assessment assessment = assessmentRepository.findById(assessmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Assessment not found with id: " + assessmentId));
 
         List<MarkDTO> createdMarks = new ArrayList<>();
 
-        for (MarkUpdateRequest markRequest : request.getMarks()) {
+        for (MarkCreateRequest markRequest : request.getMarks()) {
             try {
                 // Validate student belongs to class
                 Student student = studentRepository.findById(markRequest.getStudentId())
@@ -92,7 +92,7 @@ public class TeacherMarkService {
                 }
 
                 // Validate totalMarks
-                if (markRequest.getMarksObtained() > assessment.getMaxMarks()) {
+                if (markRequest.getTotalMarks() > assessment.getMaxMarks()) {
                     System.err.println("Skipped mark for student " + markRequest.getStudentId() +
                             ": totalMarks exceeds assessment maxMarks");
                     continue;
@@ -101,7 +101,7 @@ public class TeacherMarkService {
                 Mark mark = Mark.builder()
                         .student(student)
                         .assessment(assessment)
-                        .totalMarks(markRequest.getMarksObtained())
+                        .totalMarks(markRequest.getTotalMarks())
                         .build();
 
                 createdMarks.add(toMarkDto(markRepository.save(mark)));

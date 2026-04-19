@@ -113,7 +113,10 @@ function mapClassFromApi(item) {
     branch: item.branch,
     semester: item.semester,
     section: item.section || '',
-    academic_year: item.academicYear,
+    academicYear: item.academicYear ?? item.academic_year ?? null,
+    academic_year: item.academicYear ?? item.academic_year ?? null,
+    studentCount: Number(item.studentCount ?? 0),
+    subjects: Array.isArray(item.subjects) ? item.subjects : [],
   };
 }
 
@@ -122,7 +125,7 @@ function mapClassToApi(item) {
     branch: item.branch,
     semester: Number(item.semester),
     section: item.section,
-    academicYear: String(item.academic_year),
+    academicYear: String(item.academicYear ?? item.academic_year ?? ''),
   };
 }
 

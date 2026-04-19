@@ -6,6 +6,7 @@ import { cacheGet, cacheSet, cacheInvalidate } from './cacheManager';
  *
  * Endpoints covered:
  *  - GET  /api/teacher/classrooms/my-assignments
+ *  - GET  /api/teacher/classrooms/:classId
  *  - GET  /api/teacher/grades                          (classId?, subjectId?)
  *  - GET  /api/teacher/grades/:assessmentId
  *  - POST /api/teacher/marks/assessment/:assessmentId
@@ -155,6 +156,26 @@ function normalizeAssignment(item) {
 }
 
 /**
+ * Normalize the updated AcademicClassDTO from the backend.
+ *
+ * Backend: { id, branch, semester, section, academicYear, studentCount, subjects }
+ * Frontend: { id, branch, semester, section, academicYear, academic_year,
+ *             studentCount, subjects }
+ */
+function normalizeAcademicClass(item) {
+  return {
+    id: item.id,
+    branch: item.branch ?? null,
+    semester: item.semester ?? null,
+    section: item.section ?? null,
+    academicYear: item.academicYear ?? item.academic_year ?? null,
+    academic_year: item.academicYear ?? item.academic_year ?? null,
+    studentCount: Number(item.studentCount ?? 0),
+    subjects: Array.isArray(item.subjects) ? item.subjects : [],
+  };
+}
+
+/**
  * Normalize an AssessmentDTO from the backend.
  *
  * Backend:  { id, name, type, subjectId, classId, maxMarks, examDate }
@@ -251,6 +272,19 @@ export async function getMyAssignments() {
     fallback: 'Failed to fetch your assignments',
   });
   return Array.isArray(data) ? data.map(normalizeAssignment) : [];
+}
+
+/**
+ * Fetch a single class by its ID for teacher-side class context.
+ * @param {number} classId
+ * @returns {Promise<object>} Normalized academic class.
+ */
+export async function getClassById(classId) {
+  const data = await request(`/api/teacher/classrooms/${classId}`, {
+    fresh: true,
+    fallback: `Failed to fetch class ${classId}`,
+  });
+  return normalizeAcademicClass(data);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
