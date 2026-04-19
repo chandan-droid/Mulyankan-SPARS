@@ -378,6 +378,27 @@ export async function createMarksBulk(assessmentId, marks) {
 }
 
 /**
+ * Update marks for multiple students in bulk for a single assessment.
+ * Uses backend PUT bulk update endpoint.
+ * @param {number} assessmentId
+ * @param {Array<{ studentId: number, marksObtained: number }>} marks
+ * @returns {Promise<Array>} List of normalized updated marks.
+ */
+export async function updateMarksBulk(assessmentId, marks) {
+  const data = await request(`/api/teacher/marks/assessment/${assessmentId}/bulk`, {
+    method: 'PUT',
+    body: {
+      marks: marks.map((m) => ({
+        studentId: Number(m.studentId),
+        marksObtained: Number(m.marksObtained),
+      })),
+    },
+    fallback: 'Failed to update marks in bulk',
+  });
+  return Array.isArray(data) ? data.map(normalizeMark) : [];
+}
+
+/**
  * Fetch all marks for a given assessment.
  * @param {number} assessmentId
  * @returns {Promise<Array>} List of normalized marks.

@@ -2,6 +2,7 @@ package com.devdroid.spars_server.service.admin;
 
 import com.devdroid.spars_server.dto.AcademicClassDTO;
 import com.devdroid.spars_server.entity.AcademicClass;
+import com.devdroid.spars_server.entity.Subject;
 import com.devdroid.spars_server.exception.ResourceNotFoundException;
 import com.devdroid.spars_server.repository.AcademicClassRepository;
 import java.util.List;
@@ -11,7 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
-public class AcademicClassService {
+public class AdminClassService {
 
     private final AcademicClassRepository academicClassRepository;
 
@@ -59,12 +60,19 @@ public class AcademicClassService {
     }
 
     private AcademicClassDTO toDto(AcademicClass academicClass) {
+        int studentCount = academicClass.getStudents() != null ? academicClass.getStudents().size() : 0;
+        List<String> subjectNames = academicClass.getSubjects().stream()
+                .map(Subject::getName)
+                .toList();
+
         return AcademicClassDTO.builder()
                 .id(academicClass.getId())
                 .branch(academicClass.getBranch())
                 .semester(academicClass.getSemester())
                 .section(academicClass.getSection())
                 .academicYear(academicClass.getAcademicYear())
+                .studentCount(studentCount)
+                .subjects(subjectNames)
                 .build();
     }
 }

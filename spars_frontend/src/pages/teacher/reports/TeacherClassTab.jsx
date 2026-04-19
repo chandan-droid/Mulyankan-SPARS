@@ -15,38 +15,53 @@ function PerformBadge({ pct }) {
 export default function TeacherClassTab({ reportData, selectedSubject, relevantStudents, branch, semester, section }) {
   const allAssessments = reportData?.assessments ?? [];
   const marksData = Array.isArray(reportData?.marks) ? reportData.marks : [];
+  const subjectAssessmentIds = useMemo(() => {
+    return new Set(
+      allAssessments
+        .filter((a) => String(a.subjectId) === String(selectedSubject))
+        .map((a) => String(a.id))
+    );
+  }, [allAssessments, selectedSubject]);
 
   const classOverview = useMemo(() => {
     if (!selectedSubject) return { rows: [], avg: 0 };
+
+    const assessmentById = new Map(allAssessments.map((a) => [String(a.id), a]));
     
     const rows = relevantStudents.map(student => {
-      const marks = marksData.filter(m => m.studentId === student.id && String(m.subjectId) === String(selectedSubject));
+      const marks = marksData.filter(
+        (m) =>
+          String(m.studentId) === String(student.id) &&
+          subjectAssessmentIds.has(String(m.assessmentId))
+      );
       let tot = 0, max = 0;
       let midsem = 0, quiz = 0, assign1 = 0, assign2 = 0, attend = 0;
       let maxMidsem = 0, maxQuiz = 0, maxAssign1 = 0, maxAssign2 = 0, maxAttend = 0;
 
       for (const m of marks) {
-        const a = allAssessments.find(x => x.id === m.assessmentId);
+        const a = assessmentById.get(String(m.assessmentId));
         if (!a) continue;
-        tot += m.totalMarks;
-        max += a.maxMarks;
+        const marksValue = Number(m.totalMarks ?? m.marksObtained ?? 0);
+        const maxMarksValue = Number(a.maxMarks ?? 0);
+        tot += marksValue;
+        max += maxMarksValue;
 
         const assessmentType = String(a.type || m.assessmentType || '').toUpperCase();
         switch(assessmentType) {
-          case 'MIDSEM': midsem += m.totalMarks; maxMidsem += a.maxMarks; break;
-          case 'QUIZ': quiz += m.totalMarks; maxQuiz += a.maxMarks; break;
+          case 'MIDSEM': midsem += marksValue; maxMidsem += maxMarksValue; break;
+          case 'QUIZ': quiz += marksValue; maxQuiz += maxMarksValue; break;
           case 'ASSIGNMENT': {
             const assessmentName = String(a.name || '').toUpperCase();
             if (assessmentName.includes('2')) {
-              assign2 += m.totalMarks;
-              maxAssign2 += a.maxMarks;
+              assign2 += marksValue;
+              maxAssign2 += maxMarksValue;
             } else {
-              assign1 += m.totalMarks;
-              maxAssign1 += a.maxMarks;
+              assign1 += marksValue;
+              maxAssign1 += maxMarksValue;
             }
             break;
           }
-          case 'ATTENDANCE': attend += m.totalMarks; maxAttend += a.maxMarks; break;
+          case 'ATTENDANCE': attend += marksValue; maxAttend += maxMarksValue; break;
         }
       }
       const pct = max > 0 ? +((tot / max) * 100).toFixed(1) : 0;
@@ -72,7 +87,7 @@ export default function TeacherClassTab({ reportData, selectedSubject, relevantS
     return { 
       rows, avg, passCount, failCount: rows.length - passCount, passPie: [{ name: 'Pass', value: passCount }, { name: 'Fail', value: rows.length - passCount }].filter(x => x.value > 0)
     };
-  }, [selectedSubject, relevantStudents, marksData, allAssessments]);
+  }, [selectedSubject, relevantStudents, marksData, allAssessments, subjectAssessmentIds]);
 
   if (!selectedSubject) return null;
 

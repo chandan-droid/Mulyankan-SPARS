@@ -2,7 +2,7 @@ package com.devdroid.spars_server.controller.admin;
 
 import com.devdroid.spars_server.dto.AcademicClassDTO;
 import com.devdroid.spars_server.dto.ApiResponse;
-import com.devdroid.spars_server.service.admin.AcademicClassService;
+import com.devdroid.spars_server.service.admin.AdminClassService;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -23,11 +23,11 @@ import org.springframework.web.bind.annotation.RestController;
 @PreAuthorize("hasRole('ADMIN')")
 public class AcademicClassController {
 
-    private final AcademicClassService academicClassService;
+    private final AdminClassService adminClassService;
 
     @PostMapping
     public ResponseEntity<ApiResponse<AcademicClassDTO>> createClass(@Valid @RequestBody AcademicClassDTO request) {
-        AcademicClassDTO createdClass = academicClassService.createClass(request);
+        AcademicClassDTO createdClass = adminClassService.createClass(request);
         return ResponseEntity.ok(ApiResponse.<AcademicClassDTO>builder()
                 .success(true)
                 .message("Class created successfully")
@@ -37,7 +37,7 @@ public class AcademicClassController {
 
     @GetMapping
     public ResponseEntity<ApiResponse<List<AcademicClassDTO>>> getAllClasses() {
-        List<AcademicClassDTO> classes = academicClassService.getAllClasses();
+        List<AcademicClassDTO> classes = adminClassService.getAllClasses();
         return ResponseEntity.ok(ApiResponse.<List<AcademicClassDTO>>builder()
                 .success(true)
                 .message("Classes fetched successfully")
@@ -47,7 +47,7 @@ public class AcademicClassController {
 
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<AcademicClassDTO>> getClassById(@PathVariable Long id) {
-        AcademicClassDTO academicClass = academicClassService.getClassById(id);
+        AcademicClassDTO academicClass = adminClassService.getClassById(id);
         return ResponseEntity.ok(ApiResponse.<AcademicClassDTO>builder()
                 .success(true)
                 .message("Class fetched successfully")
@@ -57,7 +57,7 @@ public class AcademicClassController {
 
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<AcademicClassDTO>> updateClass(@PathVariable Long id, @Valid @RequestBody AcademicClassDTO request) {
-        AcademicClassDTO updatedClass = academicClassService.updateClass(id, request);
+        AcademicClassDTO updatedClass = adminClassService.updateClass(id, request);
         return ResponseEntity.ok(ApiResponse.<AcademicClassDTO>builder()
                 .success(true)
                 .message("Class updated successfully")
@@ -67,7 +67,7 @@ public class AcademicClassController {
 
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> deleteClass(@PathVariable Long id) {
-        academicClassService.deleteClass(id);
+        adminClassService.deleteClass(id);
         return ResponseEntity.ok(ApiResponse.<Void>builder()
                 .success(true)
                 .message("Class deleted successfully")

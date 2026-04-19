@@ -2,6 +2,29 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 
+let _logoDataUrlPromise = null;
+
+async function getOutrLogoDataUrl() {
+  if (!_logoDataUrlPromise) {
+    _logoDataUrlPromise = fetch('/outr.png')
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to load logo');
+        return res.blob();
+      })
+      .then(
+        (blob) =>
+          new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          })
+      )
+      .catch(() => null);
+  }
+  return _logoDataUrlPromise;
+}
+
 // ─────────────────────────────────────────────
 // Grade helper
 // ─────────────────────────────────────────────
@@ -24,44 +47,58 @@ export function getPerformanceColor(percentage) {
 // ─────────────────────────────────────────────
 // Shared PDF helpers
 // ─────────────────────────────────────────────
-function drawHeader(doc, title, subtitle = '') {
-  // Gradient-style header bar
-  doc.setFillColor(59, 71, 153);
-  doc.rect(0, 0, 210, 36, 'F');
-  doc.setFillColor(40, 100, 180);
-  doc.rect(160, 0, 50, 36, 'F');
+async function drawHeader(doc, title, subtitle = '') {
+  // Clean white header container
+  doc.setFillColor(255, 255, 255);
+  doc.rect(0, 0, 210, 42, 'F');
+  doc.setDrawColor(224, 231, 255);
+  doc.setLineWidth(0.5);
+  doc.line(14, 38, 196, 38);
 
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(13);
+  const logoDataUrl = await getOutrLogoDataUrl();
+  if (logoDataUrl) {
+    doc.addImage(logoDataUrl, 'PNG', 171, 8, 24, 24);
+  }
+
+  doc.setTextColor(31, 41, 55);
+  doc.setFontSize(12.5);
   doc.setFont('helvetica', 'bold');
   doc.text('ODISHA UNIVERSITY OF TECHNOLOGY AND RESEARCH, BHUBANESWAR', 14, 13);
-  doc.setFontSize(8);
+  doc.setTextColor(37, 99, 235);
+  doc.setFontSize(8.5);
   doc.setFont('helvetica', 'normal');
-  doc.text('Academic Performance Intelligence Report', 14, 18.5);
+  doc.text('Academic Performance Intelligence Report', 14, 19);
+  doc.setTextColor(107, 114, 128);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Generated: ${new Date().toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}`, 14, 24);
+  doc.text(`Generated: ${new Date().toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}`, 14, 25.5);
 
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
-  doc.text(title, 14, 31.5);
+  doc.setTextColor(147, 51, 234);
+  doc.text(title, 14, 32.5);
   if (subtitle) {
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
-    doc.text(subtitle, 14 + doc.getTextWidth(title) + 4, 31.5);
+    doc.setTextColor(217, 70, 239);
+    doc.text(subtitle, 14 + doc.getTextWidth(title) + 4, 32.5);
   }
 }
 
 function infoBox(doc, items, startY) {
-  doc.setFillColor(245, 246, 255);
+  doc.setFillColor(248, 250, 255);
   doc.roundedRect(14, startY, 182, items.length * 7 + 6, 4, 4, 'F');
-  doc.setTextColor(30, 30, 60);
+  doc.setDrawColor(219, 234, 254);
+  doc.roundedRect(14, startY, 182, items.length * 7 + 6, 4, 4, 'S');
+  doc.setTextColor(30, 41, 59);
   doc.setFontSize(9);
   let y = startY + 9;
   items.forEach(([label, val]) => {
     doc.setFont('helvetica', 'bold');
+    doc.setTextColor(59, 130, 246);
     doc.text(`${label}:`, 20, y);
     doc.setFont('helvetica', 'normal');
+    doc.setTextColor(31, 41, 55);
     doc.text(String(val), 60, y);
     y += 7;
   });
@@ -71,21 +108,21 @@ function infoBox(doc, items, startY) {
 function sectionTitle(doc, text, y) {
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(59, 71, 153);
+  doc.setTextColor(79, 70, 229);
   doc.text(text, 14, y);
-  doc.setDrawColor(59, 71, 153);
+  doc.setDrawColor(165, 180, 252);
   doc.setLineWidth(0.4);
   doc.line(14, y + 2, 196, y + 2);
-  doc.setTextColor(30, 30, 60);
+  doc.setTextColor(30, 41, 59);
   return y + 8;
 }
 
 // ─────────────────────────────────────────────
 // Student Performance PDF
 // ─────────────────────────────────────────────
-export function exportStudentReportPDF(report) {
+export async function exportStudentReportPDF(report) {
   const doc = new jsPDF();
-  drawHeader(doc, 'Student Performance Report');
+  await drawHeader(doc, 'Student Performance Report');
 
   let y = infoBox(doc, [
     ['Name',     report.studentName],
@@ -93,7 +130,7 @@ export function exportStudentReportPDF(report) {
     ['Branch',   report.branch],
     ['Semester', String(report.semester)],
     ['Section',  report.section],
-  ], 42);
+  ], 46);
 
   y = sectionTitle(doc, 'Assessment Breakdown', y + 4);
 
@@ -108,8 +145,8 @@ export function exportStudentReportPDF(report) {
       r.percentage + '%',
       getGrade(parseFloat(r.percentage)).grade,
     ]),
-    headStyles: { fillColor: [59, 71, 153], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-    alternateRowStyles: { fillColor: [245, 246, 255] },
+    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+    alternateRowStyles: { fillColor: [248, 250, 255] },
     styles: { fontSize: 8, cellPadding: 3 },
     didParseCell: data => {
       if (data.column.index === 5 && data.section === 'body') {
@@ -151,14 +188,14 @@ export function exportStudentReportPDF(report) {
 
   // Summary box
   if (y + 28 > 280) { doc.addPage(); y = 20; }
-  doc.setFillColor(243, 244, 255);
+  doc.setFillColor(250, 245, 255);
   doc.roundedRect(14, y, 182, 28, 4, 4, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
-  doc.setTextColor(59, 71, 153);
+  doc.setTextColor(126, 34, 206);
   doc.text('Summary', 20, y + 10);
   doc.setFontSize(9);
-  doc.setTextColor(30, 30, 60);
+  doc.setTextColor(31, 41, 55);
   doc.text(`Total: ${report.totalMarks} / ${report.maxPossible}`, 20, y + 20);
   doc.text(`Percentage: ${report.percentage}%`, 80, y + 20);
   doc.text(`Grade: ${report.grade}`, 152, y + 20);
@@ -169,11 +206,11 @@ export function exportStudentReportPDF(report) {
 // ─────────────────────────────────────────────
 // Class Report PDF
 // ─────────────────────────────────────────────
-export function exportClassReportPDF(classLabel, rows, avgPct, passCount, failCount) {
+export async function exportClassReportPDF(classLabel, rows, avgPct, passCount, failCount) {
   const doc = new jsPDF();
-  drawHeader(doc, 'Class Performance Report', `| ${classLabel}`);
+  await drawHeader(doc, 'Class Performance Report', `| ${classLabel}`);
 
-  let y = 44;
+  let y = 46;
   y = infoBox(doc, [
     ['Class',     classLabel],
     ['Students',  rows.length],
@@ -197,8 +234,8 @@ export function exportClassReportPDF(classLabel, rows, avgPct, passCount, failCo
       r.percentile ? r.percentile + '%' : '—',
       r.status,
     ]),
-    headStyles: { fillColor: [59, 71, 153], textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
-    alternateRowStyles: { fillColor: [245, 246, 255] },
+    headStyles: { fillColor: [14, 165, 233], textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
+    alternateRowStyles: { fillColor: [248, 250, 255] },
     styles: { fontSize: 7.5, cellPadding: 2.5 },
     didParseCell: data => {
       if (data.column.index === 8 && data.section === 'body') {
@@ -210,11 +247,11 @@ export function exportClassReportPDF(classLabel, rows, avgPct, passCount, failCo
 
   const fy = doc.lastAutoTable.finalY + 10;
   if (fy + 22 <= 280) {
-    doc.setFillColor(243, 244, 255);
+    doc.setFillColor(239, 246, 255);
     doc.roundedRect(14, fy, 182, 18, 4, 4, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    doc.setTextColor(30, 30, 60);
+    doc.setTextColor(2, 132, 199);
     doc.text(`Class Avg: ${avgPct}%   |   Pass: ${passCount}   |   Fail: ${failCount}`, 20, fy + 12);
   }
 
@@ -224,11 +261,11 @@ export function exportClassReportPDF(classLabel, rows, avgPct, passCount, failCo
 // ─────────────────────────────────────────────
 // CO Attainment PDF
 // ─────────────────────────────────────────────
-export function exportCOAttainmentPDF(classLabel, coData, threshold = 60) {
+export async function exportCOAttainmentPDF(classLabel, coData, threshold = 60) {
   const doc = new jsPDF();
-  drawHeader(doc, 'CO Attainment Report', `| ${classLabel}`);
+  await drawHeader(doc, 'CO Attainment Report', `| ${classLabel}`);
 
-  let y = 44;
+  let y = 46;
   y = sectionTitle(doc, `Course Outcome Attainment — ${classLabel} (Threshold: ${threshold}%)`, y + 2);
 
   autoTable(doc, {
@@ -242,8 +279,8 @@ export function exportCOAttainmentPDF(classLabel, coData, threshold = 60) {
       threshold + '%',
       co.avg >= threshold ? '✓ Attained' : '✗ Not Attained',
     ]),
-    headStyles: { fillColor: [22, 120, 100], textColor: 255, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [240, 255, 248] },
+    headStyles: { fillColor: [16, 185, 129], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [236, 253, 245] },
     styles: { fontSize: 9, cellPadding: 4 },
     didParseCell: data => {
       if (data.column.index === 5 && data.section === 'body') {
@@ -256,14 +293,14 @@ export function exportCOAttainmentPDF(classLabel, coData, threshold = 60) {
   const attained = coData.filter(c => c.avg >= threshold).length;
   const fy = doc.lastAutoTable.finalY + 10;
   if (fy + 28 <= 280) {
-    doc.setFillColor(240, 255, 248);
+    doc.setFillColor(236, 253, 245);
     doc.roundedRect(14, fy, 182, 24, 4, 4, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
-    doc.setTextColor(22, 120, 100);
+    doc.setTextColor(5, 150, 105);
     doc.text('Attainment Summary', 20, fy + 10);
     doc.setFontSize(9);
-    doc.setTextColor(30, 30, 60);
+    doc.setTextColor(31, 41, 55);
     doc.text(`${attained} of ${coData.length} COs attained the ${threshold}% threshold`, 20, fy + 20);
   }
 

@@ -20,12 +20,9 @@ import {
 import {
   getMyAssignments,
   getMyAssessments,
-  createMark,
-  updateMark,
-  createQuestionMark,
-  updateQuestionMark,
+  createMarksBulk,
+  updateMarksBulk,
   getMarksByAssessment as fetchMarksByAssessmentApi,
-  getQuestionMarksByMark as fetchQuestionMarksByMarkApi,
   getQuestionMarksByAssessmentAndClass as fetchQuestionMarksByAssessmentAndClassApi,
   saveQuestionMarksByAssessmentAndClass as saveQuestionMarksBulkApi,
   getStudentsByClass as fetchStudentsByClassApi,
@@ -33,7 +30,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Table,
   TableBody,
@@ -50,16 +46,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogFooter,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Save, PenLine, CheckCircle2, AlertCircle, Info, Settings2, FileSpreadsheet, ListChecks, ChevronRight, Download, Loader2 } from 'lucide-react';
+import { Save, PenLine, CheckCircle2, AlertCircle, FileSpreadsheet, ListChecks, ChevronRight, Download, Loader2 } from 'lucide-react';
 
 export default function MarkEntry() {
   const { user } = useAuth();
@@ -74,6 +62,8 @@ export default function MarkEntry() {
   const [selectedId, setSelectedId] = useState('');
   const [midsemRows, setMidsemRows] = useState([]);
   const [simpleRows, setSimpleRows] = useState([]);
+  const [originalMidsemRows, setOriginalMidsemRows] = useState([]);
+  const [originalSimpleRows, setOriginalSimpleRows] = useState([]);
   const [isSaving, setIsSaving] = useState(false);
   const [apiError, setApiError] = useState(null);
   const [isInitializing, setIsInitializing] = useState(true);
@@ -163,80 +153,96 @@ export default function MarkEntry() {
 
   const assessment = myAssessments.find((a) => a.id === selectedId);
 
-  // CO Mapping Dialog State
-  const [coMappingKey, setCoMappingKey] = useState(0);
-  const [openCO, setOpenCO] = useState(false);
-  const [tempQuestions, setTempQuestions] = useState([]);
+  const [midsemQuestions, setMidsemQuestions] = useState([]);
 
   const fileInputRef = useRef(null);
 
-  const handleOpenCO = () => {
-    if (midsemTemplate) {
-      setTempQuestions(JSON.parse(JSON.stringify(midsemTemplate.questions)));
-      setOpenCO(true);
+  useEffect(() => {
+    if (!assessment || assessment.type !== 'MIDSEM') {
+      setMidsemQuestions([]);
+      return;
     }
-  };
 
-  const handleSaveCO = () => {
-    saveMidsemTemplate(assessment.id, tempQuestions);
-    setCoMappingKey(prev => prev + 1);
-    setOpenCO(false);
-    
-    if (hasApiData) {
-      toast.promise(
-        (async () => {
-          const marks = await fetchMarksByAssessmentApi(assessment.id);
-          if (marks && marks.length > 0) {
-            const updatePromises = [];
-            for (const mark of marks) {
-              const existingQMs = await fetchQuestionMarksByMarkApi(mark.id);
-              for (let qi = 0; qi < tempQuestions.length; qi++) {
-                const q = tempQuestions[qi];
-                const backendQuestionNumber = qi + 1;
-                const existingQm = existingQMs.find(x => 
-                  String(x.questionNumber) === String(backendQuestionNumber) ||
-                  String(x.questionNumber) === String(q.questionNumber)
-                );
-                
-                if (existingQm) {
-                  const newCo = Number(String(q.coNumber).replace(/[^0-9]/g, '') || 1);
-                  if (existingQm.coNumber !== newCo || existingQm.maxMarks !== q.maxMarks) {
-                    updatePromises.push(
-                      updateQuestionMark(existingQm.id, {
-                        coNumber: q.coNumber,
-                        maxMarks: q.maxMarks
-                      })
-                    );
-                  }
-                }
-              }
-            }
-            if (updatePromises.length > 0) {
-              await Promise.all(updatePromises);
-            }
-          }
-        })(),
-        {
-          loading: 'Syncing CO mapping to server...',
-          success: 'CO Mapping synced successfully!',
-          error: 'Saved locally, but failed to sync to server',
-        }
-      );
-    } else {
-      toast.success('CO Mapping updated successfully');
-    }
-  };
+    const persisted = getMidsemTemplate(assessment.id)?.questions;
+    const baseQuestions = Array.isArray(persisted) && persisted.length > 0
+      ? persisted
+      : buildDefaultMidsemQuestions();
+
+    setMidsemQuestions(baseQuestions.map((q) => ({ ...q })));
+  }, [assessment]);
 
   const midsemTemplate = useMemo(() => {
     if (!assessment || assessment.type !== 'MIDSEM') return null;
-    return (
-      getMidsemTemplate(assessment.id) ?? {
-        assessmentId: assessment.id,
-        questions: buildDefaultMidsemQuestions(),
-      }
+    return {
+      assessmentId: assessment.id,
+      questions: midsemQuestions.length > 0 ? midsemQuestions : buildDefaultMidsemQuestions(),
+    };
+  }, [assessment, midsemQuestions]);
+
+  const applyCoMapping = useCallback((questions, { showToast = true } = {}) => {
+    if (!assessment || assessment.type !== 'MIDSEM') return;
+
+    setMidsemQuestions(questions.map((q) => ({ ...q })));
+    saveMidsemTemplate(assessment.id, questions);
+
+    if (!hasApiData) {
+      if (showToast) toast.success('CO Mapping updated successfully');
+      return;
+    }
+
+    const syncPromise = (async () => {
+      // Only sync CO mapping changes for students with data
+      const rowsWithClass = midsemRows.filter((row) => row.classId != null);
+      const uniqueClassIds = [...new Set(rowsWithClass.map((row) => row.classId))];
+      if (uniqueClassIds.length === 0) return;
+
+      await Promise.all(
+        uniqueClassIds.map((classId) => {
+          // Filter to only students with any marks data in this class
+          const studentsInClass = rowsWithClass.filter(
+            (row) => String(row.classId) === String(classId)
+          );
+          const studentMarks = studentsInClass
+            .map((row) => ({
+              studentId: row.studentId,
+              questionMarks: questions.map((q, qi) => ({
+                questionNumber: qi + 1,
+                coNumber: Number(String(q.coNumber).replace(/[^0-9]/g, '') || 1),
+                maxMarks: Number(q.maxMarks ?? 0),
+                obtainedMarks: Number(row.marks?.[qi] ?? 0),
+              })),
+            }))
+            .filter((sm) => sm.studentId != null); // Exclude null/undefined studentsIds
+
+          if (studentMarks.length === 0) return Promise.resolve();
+          return saveQuestionMarksBulkApi(assessment.id, classId, studentMarks);
+        })
+      );
+    })();
+
+    if (showToast) {
+      toast.promise(syncPromise, {
+        loading: 'Syncing CO mapping to server...',
+        success: 'CO Mapping synced successfully!',
+        error: 'Saved locally, but failed to sync to server',
+      });
+      return;
+    }
+
+    syncPromise.catch(() => {});
+  }, [assessment, hasApiData, midsemRows]);
+
+  const handleInlineCOMapChange = useCallback((questionIndex, coValue) => {
+    if (!midsemTemplate) return;
+    const updatedQuestions = midsemTemplate.questions.map((question, index) =>
+      index === questionIndex
+        ? { ...question, coNumber: Number(coValue) }
+        : question
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assessment, coMappingKey]);
+
+    // Inline header mapping should feel immediate; avoid noisy success toasts.
+    applyCoMapping(updatedQuestions, { showToast: false });
+  }, [midsemTemplate, applyCoMapping]);
 
   const loadMarks = useCallback(async (a) => {
     let existingMarks = getMarksForAssessment(a.id);
@@ -263,10 +269,18 @@ export default function MarkEntry() {
       }
     }
 
-    const template = getMidsemTemplate(a.id) ?? {
-      assessmentId: a.id,
-      questions: buildDefaultMidsemQuestions(),
-    };
+    const hasActiveTemplate =
+      assessment &&
+      assessment.type === 'MIDSEM' &&
+      String(assessment.id) === String(a.id) &&
+      midsemQuestions.length > 0;
+
+    const template = hasActiveTemplate
+      ? { assessmentId: a.id, questions: midsemQuestions }
+      : (getMidsemTemplate(a.id) ?? {
+          assessmentId: a.id,
+          questions: buildDefaultMidsemQuestions(),
+        });
     const numQ = template.questions.length; // 11
 
     if (a.type === 'MIDSEM') {
@@ -332,6 +346,7 @@ export default function MarkEntry() {
         })
       );
       setMidsemRows(rows);
+      setOriginalMidsemRows(JSON.parse(JSON.stringify(rows))); // Store as baseline
     } else {
       // ============ FIXED: SIMPLE ASSESSMENTS (QUIZ, ASSIGNMENT, ATTENDANCE) ============
       const processedRows = stds.map((s) => {
@@ -382,9 +397,10 @@ export default function MarkEntry() {
       });
 
       setSimpleRows(processedRows);
+      setOriginalSimpleRows(JSON.parse(JSON.stringify(processedRows))); // Store as baseline
       console.log('✓ All simple rows processed:', processedRows);
     }
-  }, [hasApiData]);
+  }, [hasApiData, assessment, midsemQuestions]);
 
   const handleSelectAssessment = (id) => {
     setSelectedId(id);
@@ -471,6 +487,38 @@ export default function MarkEntry() {
   }, [focusMarkCell]);
 
   /**
+   * Detect which students have changed marks (for optimized payload).
+   * Only returns students where marks actually differ from original state.
+   */
+  const getChangedMidsemRows = useCallback(() => {
+    return midsemRows.filter((row) => {
+      const originalRow = originalMidsemRows.find(
+        (r) => String(r.studentId) === String(row.studentId)
+      );
+      if (!originalRow) return true; // New student (no original)
+      // Check if marks array changed
+      const marksChanged = JSON.stringify(row.marks) !== JSON.stringify(originalRow.marks);
+      // Check if total changed
+      const totalChanged = Number(row.total) !== Number(originalRow.total);
+      return marksChanged || totalChanged;
+    });
+  }, [midsemRows, originalMidsemRows]);
+
+  const getChangedSimpleRows = useCallback(() => {
+    return simpleRows.filter((row) => {
+      const originalRow = originalSimpleRows.find(
+        (r) => String(r.studentId) === String(row.studentId)
+      );
+      if (!originalRow) return true; // New student
+      const marksChanged = Number(row.marks) !== Number(originalRow.marks);
+      const attendedChanged =
+        assessment?.type === 'ATTENDANCE' &&
+        Number(row.attendedClasses ?? 0) !== Number(originalRow.attendedClasses ?? 0);
+      return marksChanged || attendedChanged;
+    });
+  }, [simpleRows, originalSimpleRows, assessment]);
+
+  /**
    * Save marks — tries the real backend first, falls back to local store.
    * - MIDSEM: POST mark per student, then POST question marks per student.
    * - Others: POST bulk marks in one request.
@@ -491,27 +539,38 @@ export default function MarkEntry() {
         // Try backend API first
         try {
           const existingMarks = await fetchMarksByAssessmentApi(assessment.id);
-          const existingByStudent = new Map(
-            existingMarks.map((mark) => [String(mark.studentId), mark])
+          const existingStudentIds = new Set(
+            existingMarks.map((mark) => String(mark.studentId))
           );
 
-          await Promise.all(
-            midsemRows.map((row) => {
-              const existing = existingByStudent.get(String(row.studentId));
-              if (existing) {
-                return updateMark(existing.id, { marksObtained: Number(row.total) });
-              }
-              return createMark(assessment.id, {
-                studentId: row.studentId,
-                totalMarks: Number(row.total),
-              });
-            })
-          );
+          // Only process changed rows
+          const changedMidsemRows = getChangedMidsemRows();
 
-          // Bulk save question marks mapped by classId
-          const uniqueClassIds = [...new Set(midsemRows.map(r => r.classId).filter(Boolean))];
+          const rowsToCreate = changedMidsemRows
+            .filter((row) => !existingStudentIds.has(String(row.studentId)))
+            .map((row) => ({
+              studentId: row.studentId,
+              totalMarks: Number(row.total),
+            }));
+
+          const rowsToUpdate = changedMidsemRows
+            .filter((row) => existingStudentIds.has(String(row.studentId)))
+            .map((row) => ({
+              studentId: row.studentId,
+              marksObtained: Number(row.total),
+            }));
+
+          if (rowsToCreate.length > 0) {
+            await createMarksBulk(assessment.id, rowsToCreate);
+          }
+          if (rowsToUpdate.length > 0) {
+            await updateMarksBulk(assessment.id, rowsToUpdate);
+          }
+
+          // Bulk save question marks for only changed students, mapped by classId
+          const uniqueClassIds = [...new Set(changedMidsemRows.map(r => r.classId).filter(Boolean))];
           const bulkSavePromises = uniqueClassIds.map(cId => {
-            const studentsInClass = midsemRows.filter(r => r.classId === cId);
+            const studentsInClass = changedMidsemRows.filter(r => r.classId === cId);
             const studentMarksRequest = studentsInClass.map(row => {
               const questionMarks = midsemTemplate.questions.map((q, qi) => ({
                 questionNumber: qi + 1,
@@ -556,40 +615,39 @@ export default function MarkEntry() {
       } else {
         try {
           const existingMarks = await fetchMarksByAssessmentApi(assessment.id);
-          const existingByStudent = new Map(
-            existingMarks.map((mark) => [String(mark.studentId), mark])
+          const existingStudentIds = new Set(
+            existingMarks.map((mark) => String(mark.studentId))
           );
 
-          await Promise.all(
-            simpleRows.map((row) => {
-              const markPayload = {
-                marksObtained: Number(row.marks),
-              };
+          // Only process changed rows
+          const changedSimpleRows = getChangedSimpleRows();
 
-              if (assessment.type === 'ATTENDANCE') {
-                markPayload.attendedClasses = Number(row.attendedClasses ?? 0);
-              }
-              if (assessment.type === 'QUIZ') {
-                markPayload.quizMarks = Number(row.marks ?? 0);
-              }
+          const rowsToCreate = changedSimpleRows
+            .filter((row) => !existingStudentIds.has(String(row.studentId)))
+            .map((row) => ({
+              studentId: row.studentId,
+              totalMarks: Number(row.marks),
+              ...(assessment.type === 'ATTENDANCE'
+                ? { attendedClasses: Number(row.attendedClasses ?? 0) }
+                : {}),
+              ...(assessment.type === 'QUIZ'
+                ? { quizMarks: Number(row.marks ?? 0) }
+                : {}),
+            }));
 
-              const existing = existingByStudent.get(String(row.studentId));
-              if (existing) {
-                return updateMark(existing.id, markPayload);
-              }
+          const rowsToUpdate = changedSimpleRows
+            .filter((row) => existingStudentIds.has(String(row.studentId)))
+            .map((row) => ({
+              studentId: row.studentId,
+              marksObtained: Number(row.marks),
+            }));
 
-              return createMark(assessment.id, {
-                studentId: row.studentId,
-                totalMarks: Number(row.marks),
-                ...(assessment.type === 'ATTENDANCE'
-                  ? { attendedClasses: Number(row.attendedClasses ?? 0) }
-                  : {}),
-                ...(assessment.type === 'QUIZ'
-                  ? { quizMarks: Number(row.marks ?? 0) }
-                  : {}),
-              });
-            })
-          );
+          if (rowsToCreate.length > 0) {
+            await createMarksBulk(assessment.id, rowsToCreate);
+          }
+          if (rowsToUpdate.length > 0) {
+            await updateMarksBulk(assessment.id, rowsToUpdate);
+          }
 
           toast.success(`Marks synced to server (${simpleRows.length} records)`);
         } catch (apiErr) {
@@ -753,6 +811,32 @@ export default function MarkEntry() {
   const getSubjectName = (id) =>
     subjects.find((s) => s.id === id)?.subjectName || id;
 
+  const getCompactAssessmentCode = (assessmentItem) => {
+    const type = String(assessmentItem.type || '').toUpperCase();
+    const name = String(assessmentItem.name || '').toUpperCase();
+
+    if (type === 'MIDSEM') return 'MID';
+    if (type === 'QUIZ') return 'QUIZ';
+    if (type === 'ATTENDANCE') return 'ATT';
+    if (type === 'ASSIGNMENT') {
+      const numMatch = name.match(/\d+/);
+      if (numMatch) return `ASG-${numMatch[0]}`;
+      return 'ASG';
+    }
+
+    const fallback = (name || type || 'ASSESS').replace(/[^A-Z0-9]/g, '');
+    return fallback.slice(0, 6);
+  };
+
+  const getMidsemQuestionLabel = (question, index) => {
+    const raw = String(question?.questionNumber ?? '').trim();
+    if (!raw) {
+      const fallback = buildDefaultMidsemQuestions()[index]?.questionNumber;
+      return String(fallback ?? index + 1).toUpperCase();
+    }
+    return raw.replace(/^q/i, '').toUpperCase();
+  };
+
   // Group assessments by course for the master list
   const groupedMenu = Object.values(
     myAssessments.reduce((acc, a) => {
@@ -771,6 +855,13 @@ export default function MarkEntry() {
       return acc;
     }, {})
   );
+
+  useEffect(() => {
+    if (selectedId || myAssessments.length === 0) return;
+    const firstAssessment = myAssessments[0];
+    setSelectedId(firstAssessment.id);
+    loadMarks(firstAssessment);
+  }, [selectedId, myAssessments, loadMarks]);
 
   if (isInitializing) {
     return (
@@ -811,7 +902,30 @@ export default function MarkEntry() {
               Your Assessments
             </span>
           </h3>
-          <div className="bg-card/40 backdrop-blur-sm border border-border/40 rounded-2xl p-2.5 h-[calc(100vh-280px)] overflow-y-auto lg:overflow-y-hidden lg:group-hover/assess:overflow-y-auto shadow-inner overflow-hidden">
+          <div className="relative bg-card/40 backdrop-blur-sm border border-border/40 rounded-2xl p-2.5 h-[calc(100vh-280px)] overflow-y-auto lg:overflow-y-hidden lg:group-hover/assess:overflow-y-auto shadow-inner overflow-hidden">
+            <div className="hidden lg:flex lg:flex-col gap-2 lg:absolute lg:inset-2.5 transition-opacity duration-200 lg:opacity-100 lg:group-hover/assess:opacity-0 lg:group-hover/assess:pointer-events-none">
+              {groupedMenu.length === 0 && (
+                <div className="p-2 text-center text-muted-foreground/60">
+                  <AlertCircle className="w-5 h-5 mx-auto opacity-50" />
+                </div>
+              )}
+              {groupedMenu.flatMap((group) => group.assessments).map((a) => {
+                const isSelected = selectedId === a.id;
+                return (
+                  <button
+                    key={`compact-${a.id}`}
+                    onClick={() => handleSelectAssessment(a.id)}
+                    title={`${a.name || a.type} - ${getSubjectName(a.subjectId)}`}
+                    className={`w-full h-11 rounded-xl border text-[10px] font-extrabold tracking-wider transition-all duration-200 ${isSelected
+                        ? 'bg-primary/15 border-primary/40 text-primary shadow-sm'
+                        : 'bg-background/80 border-border/40 text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                      }`}
+                  >
+                    {getCompactAssessmentCode(a)}
+                  </button>
+                );
+              })}
+            </div>
             <div className="space-y-2.5 transition-opacity duration-200 lg:opacity-0 lg:pointer-events-none lg:group-hover/assess:opacity-100 lg:group-hover/assess:pointer-events-auto">
               {groupedMenu.length === 0 && (
                 <div className="p-8 text-center text-muted-foreground/60">
@@ -925,27 +1039,6 @@ export default function MarkEntry() {
                 {/* ── MIDSEM ─────────────────────────────────── */}
                 {assessment.type === 'MIDSEM' && midsemTemplate && (
                   <>
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between px-5 py-3 bg-muted/20 border-b border-border/30 gap-3">
-                      <div className="flex flex-wrap items-center gap-2 max-w-3xl">
-                        <Info className="h-4 w-4 text-primary shrink-0" />
-                        <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground mr-1">Tied Structure:</span>
-                        {midsemTemplate.questions.map((q) => (
-                          <span
-                            key={q.questionNumber}
-                            className="text-[11px] flex items-center gap-1 text-muted-foreground bg-background rounded border border-border/40 px-1"
-                          >
-                            <span className="font-bold text-foreground">
-                              Q{q.questionNumber}
-                            </span>
-                            <span className="text-[9px] text-primary font-bold ml-0.5">CO{q.coNumber}</span>
-                          </span>
-                        ))}
-                      </div>
-                      <Button variant="outline" size="sm" onClick={handleOpenCO} className="h-8 text-xs shrink-0 rounded-lg hover:bg-primary/5 hover:text-primary border-border/60">
-                        <Settings2 className="h-3.5 w-3.5 mr-1.5" /> Shift Structure
-                      </Button>
-                    </div>
-
                     <Table>
                       <TableHeader>
                         <TableRow className="bg-muted/40 hover:bg-muted/40 border-b border-border/40">
@@ -964,13 +1057,27 @@ export default function MarkEntry() {
                         </TableRow>
                         <TableRow className="bg-muted/10 hover:bg-muted/10 border-b border-border/30">
                           <TableHead className="sticky left-0 bg-muted/10 z-10 p-2" />
-                          {midsemTemplate.questions.map((q) => (
+                          {midsemTemplate.questions.map((q, qi) => (
                             <TableHead
-                              key={q.questionNumber}
+                              key={`${q.questionNumber}-${qi}`}
                               className={`text-center min-w-[70px] text-[10px] p-2 leading-none border-x border-border/10 ${q.part === 'A' ? 'bg-blue-500/5' : 'bg-purple-500/5'}`}
                             >
-                              <div className="font-extrabold text-foreground mb-0.5">Q{q.questionNumber}</div>
+                              <div className="font-extrabold text-foreground mb-0.5">Q {getMidsemQuestionLabel(q, qi)}</div>
                               <span className="text-[8px] font-bold text-muted-foreground uppercase">{q.maxMarks}m MAX</span>
+                              <div className="mt-1 flex justify-center">
+                                <Select value={String(q.coNumber)} onValueChange={(v) => handleInlineCOMapChange(qi, v)}>
+                                  <SelectTrigger className="h-6 min-w-[58px] px-1 rounded-md text-[9px] font-extrabold border-border/60 bg-background/80">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {[1, 2, 3, 4, 5].map((co) => (
+                                      <SelectItem key={co} value={String(co)}>
+                                        CO {co}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
                             </TableHead>
                           ))}
                           <TableHead />
@@ -1138,53 +1245,6 @@ export default function MarkEntry() {
         </div>
       </div>
 
-      {/* Edit CO Mapping Dialog */}
-      <Dialog open={openCO} onOpenChange={setOpenCO}>
-        <DialogContent className="rounded-3xl max-w-sm p-0 overflow-hidden border-border/40 shadow-2xl">
-          <div className="h-2 w-full stat-gradient-blue" />
-          <div className="p-6">
-            <DialogHeader className="mb-4 text-left">
-              <DialogTitle className="font-heading font-extrabold text-xl">Shift Structure</DialogTitle>
-              <DialogDescription className="text-xs font-medium">Re-route learning outcomes to specific queries.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-2 mt-2 custom-scrollbar">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/30 hover:bg-transparent">
-                    <TableHead className="h-8 text-[10px] font-extrabold uppercase tracking-widest px-2">Part</TableHead>
-                    <TableHead className="h-8 text-[10px] font-extrabold uppercase tracking-widest px-2">Q No.</TableHead>
-                    <TableHead className="h-8 text-[10px] font-extrabold uppercase tracking-widest px-2 text-right">Target</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {tempQuestions.map((q, i) => (
-                    <TableRow key={q.questionNumber} className="hover:bg-transparent border-b border-border/30">
-                      <TableCell className="p-2 py-3"><span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full ${q.part === 'A' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{q.part}</span></TableCell>
-                      <TableCell className="p-2 py-3 font-bold text-sm text-foreground">Q{q.questionNumber}</TableCell>
-                      <TableCell className="p-2 py-3 text-right">
-                        <Select value={String(q.coNumber)} onValueChange={(v) => {
-                          const newQs = [...tempQuestions];
-                          newQs[i].coNumber = Number(v);
-                          setTempQuestions(newQs);
-                        }}>
-                          <SelectTrigger className="h-9 rounded-xl text-xs font-bold w-28 ml-auto border-border/60 bg-background"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {[1, 2, 3, 4, 5].map(co => <SelectItem key={co} value={String(co)}>CO {co}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-            <DialogFooter className="mt-6 gap-3">
-              <Button variant="outline" onClick={() => setOpenCO(false)} className="rounded-xl flex-1 h-11 font-bold">Discard</Button>
-              <Button onClick={handleSaveCO} className="rounded-xl flex-1 h-11 btn-gradient text-white font-bold shadow-lg shadow-primary/20">Apply Map</Button>
-            </DialogFooter>
-          </div>
-        </DialogContent>
-      </Dialog>
     </DashboardLayout>
   );
 }

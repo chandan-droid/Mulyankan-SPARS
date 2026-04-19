@@ -1,15 +1,14 @@
 package com.devdroid.spars_server.entity;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import com.devdroid.spars_server.entity.Student;
+import com.devdroid.spars_server.entity.Subject;
+import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import java.util.List;
 
 @Entity
 @Table(name = "classes")
@@ -34,4 +33,10 @@ public class AcademicClass {
 
     @Column(name = "academic_year", nullable = false)
     private String academicYear;
+
+    @OneToMany(mappedBy = "academicClass", fetch = FetchType.EAGER)
+    private List<Student> students;
+
+    @OneToMany(mappedBy = "academicClass", fetch = FetchType.EAGER)
+    private List<Subject> subjects;
 }

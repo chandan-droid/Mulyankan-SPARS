@@ -7,6 +7,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -25,4 +27,7 @@ public class AcademicClassDTO {
 
     @NotBlank(message = "academicYear is required")
     private String academicYear;
+
+    private int studentCount;
+    private List<String> subjects;
 }

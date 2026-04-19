@@ -68,12 +68,16 @@ export default function TeacherReports() {
   const [loadingAssignments, setLoadingAssignments] = useState(true);
   const [loadingClassData, setLoadingClassData] = useState(false);
 
-  const allSubjects = getSubjects();
-  const allStudents = getStudents();
-  const allAssessments = getAssessments();
-  const allMarks = getMarks();
-  const allQuestionMarks = getQuestionMarks();
-  const localAssignments = getAssignmentsForTeacher(user?.id || '');
+  // Snapshot local store values with stable references to avoid effect churn.
+  const allSubjects = useMemo(() => getSubjects(), []);
+  const allStudents = useMemo(() => getStudents(), []);
+  const allAssessments = useMemo(() => getAssessments(), []);
+  const allMarks = useMemo(() => getMarks(), []);
+  const allQuestionMarks = useMemo(() => getQuestionMarks(), []);
+  const localAssignments = useMemo(
+    () => getAssignmentsForTeacher(user?.id || ''),
+    [user?.id]
+  );
 
   // Fetch assignments from real API, fall back to local store
   useEffect(() => {
@@ -148,6 +152,8 @@ export default function TeacherReports() {
   }, [selectedAssignmentKey, assignedSubjects]);
 
   const selectedSubject = currentAssignment?.subjectId ? String(currentAssignment.subjectId) : '';
+  const currentAssignmentKey = currentAssignment?.key || '';
+  const currentAssignmentClassId = currentAssignment?.classId ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -172,8 +178,8 @@ export default function TeacherReports() {
 
       try {
         let classStudents = [];
-        if (currentAssignment.classId != null) {
-          classStudents = await getStudentsByClass(currentAssignment.classId);
+        if (currentAssignmentClassId != null) {
+          classStudents = await getStudentsByClass(currentAssignmentClassId);
         } else {
           classStudents = allStudents.filter((student) =>
             isStudentInAssignment(student, currentAssignment)
@@ -203,10 +209,10 @@ export default function TeacherReports() {
           .map((mark) => mark.id);
 
         let qmsSettled = [];
-        if (currentAssignment.classId != null) {
+        if (currentAssignmentClassId != null) {
           qmsSettled = await Promise.allSettled(
             Array.from(midsemAssessments).map((assessmentId) => 
-               getQuestionMarksByAssessmentAndClass(assessmentId, currentAssignment.classId)
+               getQuestionMarksByAssessmentAndClass(assessmentId, currentAssignmentClassId)
             )
           );
         } else {
@@ -236,7 +242,8 @@ export default function TeacherReports() {
       cancelled = true;
     };
   }, [
-    currentAssignment,
+    currentAssignmentKey,
+    currentAssignmentClassId,
     apiAssignments,
     apiAssessments,
     allAssessments,
@@ -290,62 +297,64 @@ export default function TeacherReports() {
 
   return (
     <DashboardLayout navItems={teacherNavItems}>
-      {/* Header */}
-      <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl stat-gradient-teal shadow-md">
-            <FileBarChart className="h-5 w-5 text-white" />
+      <div className="rounded-2xl border border-sky-100 bg-white p-6 shadow-sm">
+        {/* Header */}
+        <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-500 shadow-md">
+              <FileBarChart className="h-5 w-5 text-white" />
+            </div>
+            <img src="/outr.png" alt="OUTR logo" className="h-10 w-10 rounded-lg border border-sky-100 bg-white p-1" />
+            <div>
+              <h1 className="text-2xl font-heading font-bold tracking-tight text-sky-700">
+                Performance Reports
+              </h1>
+              <p className="text-sm text-violet-600">
+                Deep insights into your classes' academic standing
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-heading font-bold tracking-tight text-foreground">
-              Performance Reports
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Deep insights into your classes' academic standing
-            </p>
-          </div>
-        </div>
         
-        {/* Global Subject Selector */}
-        <div className="w-full md:w-64">
-           <Select value={selectedAssignmentKey} onValueChange={setSelectedAssignmentKey}>
-             <SelectTrigger className="w-full rounded-xl h-10 bg-card border-border/60">
-               <div className="flex items-center gap-2">
-                 {loadingAssignments || loadingClassData
-                   ? <Loader2 className="h-4 w-4 text-primary animate-spin" />
-                   : <BookOpen className="h-4 w-4 text-primary" />}
-                 <SelectValue placeholder="Select Class/Subject" />
-               </div>
-             </SelectTrigger>
-             <SelectContent>
-               {assignedSubjects.map((s) => (
-                 <SelectItem key={s.key} value={s.key}>
-                   <div className="flex flex-col text-left">
-                     <span className="font-medium text-sm">{s.subjectCode} - {s.subjectName}</span>
-                     <span className="text-[10px] text-muted-foreground uppercase tracking-wider">{s.branch} • Sem {s.semester} • Sec {s.section}</span>
-                   </div>
-                 </SelectItem>
-               ))}
-             </SelectContent>
-           </Select>
+          {/* Global Subject Selector */}
+          <div className="w-full md:w-64">
+             <Select value={selectedAssignmentKey} onValueChange={setSelectedAssignmentKey}>
+               <SelectTrigger className="w-full rounded-xl h-10 bg-white border-sky-200">
+                 <div className="flex items-center gap-2">
+                   {loadingAssignments || loadingClassData
+                     ? <Loader2 className="h-4 w-4 text-sky-600 animate-spin" />
+                     : <BookOpen className="h-4 w-4 text-sky-600" />}
+                   <SelectValue placeholder="Select Class/Subject" />
+                 </div>
+               </SelectTrigger>
+               <SelectContent>
+                 {assignedSubjects.map((s) => (
+                   <SelectItem key={s.key} value={s.key}>
+                     <div className="flex flex-col text-left">
+                       <span className="font-medium text-sm">{s.subjectCode} - {s.subjectName}</span>
+                       <span className="text-[10px] text-muted-foreground uppercase tracking-wider">{s.branch} • Sem {s.semester} • Sec {s.section}</span>
+                     </div>
+                   </SelectItem>
+                 ))}
+               </SelectContent>
+             </Select>
+          </div>
         </div>
-      </div>
 
-      <Tabs defaultValue="classOverview" className="space-y-6">
-        <TabsList className="bg-muted/50 border border-border/50 p-1 rounded-xl flex flex-wrap h-auto gap-1">
-          <TabsTrigger value="classOverview" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
-            🏫 Class Overview
-          </TabsTrigger>
-          <TabsTrigger value="student" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
-            👤 Student Report
-          </TabsTrigger>
-          <TabsTrigger value="co" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
-            🎯 CO Analysis
-          </TabsTrigger>
-          <TabsTrigger value="deepdive" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
-            🔍 Assessment Deep Dive
-          </TabsTrigger>
-        </TabsList>
+        <Tabs defaultValue="classOverview" className="space-y-6">
+          <TabsList className="bg-sky-50 border border-sky-100 p-1 rounded-xl flex flex-wrap h-auto gap-1">
+            <TabsTrigger value="classOverview" className="rounded-lg text-xs font-semibold text-sky-700 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+              🏫 Class Overview
+            </TabsTrigger>
+            <TabsTrigger value="student" className="rounded-lg text-xs font-semibold text-violet-700 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+              👤 Student Report
+            </TabsTrigger>
+            <TabsTrigger value="co" className="rounded-lg text-xs font-semibold text-emerald-700 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+              🎯 CO Analysis
+            </TabsTrigger>
+            <TabsTrigger value="deepdive" className="rounded-lg text-xs font-semibold text-fuchsia-700 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+              🔍 Assessment Deep Dive
+            </TabsTrigger>
+          </TabsList>
 
         <TabsContent value="classOverview" className="mt-6">
            {selectedSubject ? (
@@ -398,7 +407,8 @@ export default function TeacherReports() {
              <div className="text-center py-24 text-muted-foreground"><BookOpen className="h-10 w-10 mx-auto mb-3 opacity-20" />Select a Class/Subject above to view reports.</div>
            )}
         </TabsContent>
-      </Tabs>
+        </Tabs>
+      </div>
     </DashboardLayout>
   );
 }

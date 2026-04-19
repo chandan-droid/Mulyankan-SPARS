@@ -20,25 +20,44 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
   const marks = Array.isArray(reportData?.marks) ? reportData.marks : [];
   const questionMarks = Array.isArray(reportData?.questionMarks) ? reportData.questionMarks : [];
   const [selectedStudent, setSelectedStudent] = useState('');
+  const subjectAssessmentIds = useMemo(() => {
+    return new Set(
+      allAssessments
+        .filter((a) => String(a.subjectId) === String(selectedSubject))
+        .map((a) => String(a.id))
+    );
+  }, [allAssessments, selectedSubject]);
+  const assessmentById = useMemo(() => {
+    return new Map(allAssessments.map((a) => [String(a.id), a]));
+  }, [allAssessments]);
 
   const report = useMemo(() => {
     if (!selectedStudent || !selectedSubject) return null;
-    const student = relevantStudents.find(s => s.id === selectedStudent);
+    const student = relevantStudents.find(s => String(s.id) === String(selectedStudent));
     if (!student) return null;
 
-    const studentMarks = marks.filter(m => m.studentId === selectedStudent && String(m.subjectId) === String(selectedSubject)).map(m => ({
-      ...m, assessmentInfo: allAssessments.find(a => a.id === m.assessmentId)
-    }));
+    const studentMarks = marks
+      .filter(
+        (m) =>
+          String(m.studentId) === String(selectedStudent) &&
+          subjectAssessmentIds.has(String(m.assessmentId))
+      )
+      .map((m) => ({
+        ...m,
+        assessmentInfo: assessmentById.get(String(m.assessmentId)),
+      }));
 
     const rows = studentMarks.map(m => {
-      const pct = m.assessmentInfo ? +((m.totalMarks / m.assessmentInfo.maxMarks) * 100).toFixed(1) : 0;
+      const marksValue = Number(m.totalMarks ?? m.marksObtained ?? 0);
+      const maxValue = Number(m.assessmentInfo?.maxMarks ?? 0);
+      const pct = maxValue > 0 ? +((marksValue / maxValue) * 100).toFixed(1) : 0;
       return {
         subject: subjectInfo?.subjectName || '',
         type: m.assessmentType || m.assessmentInfo?.type,
-        marks: m.totalMarks,
-        maxMarks: m.assessmentInfo?.maxMarks || 0,
+        marks: marksValue,
+        maxMarks: maxValue,
         percentage: pct,
-        quizMarks: m.quizMarks ?? m.totalMarks
+        quizMarks: m.quizMarks ?? marksValue
       };
     });
 
@@ -49,16 +68,24 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
     // Line chart data
     const progressData = studentMarks.map((m, i) => ({
       name: m.assessmentInfo?.name || `${m.assessmentType || 'Assessment'} ${i + 1}`,
-      marks: m.totalMarks,
-      max: m.assessmentInfo?.maxMarks || 0
+      marks: Number(m.totalMarks ?? m.marksObtained ?? 0),
+      max: Number(m.assessmentInfo?.maxMarks ?? 0)
     }));
 
     // Percentile Calc
     const subjectMarksForOtherStudents = {};
-    marks.filter(m => m.subjectId === selectedSubject).forEach(m => {
-      if(!subjectMarksForOtherStudents[m.studentId]) subjectMarksForOtherStudents[m.studentId] = { tot:0, max:0 };
-      const a = allAssessments.find(x => x.id === m.assessmentId);
-      if(a) { subjectMarksForOtherStudents[m.studentId].tot += m.totalMarks; subjectMarksForOtherStudents[m.studentId].max += a.maxMarks; }
+    marks
+      .filter((m) => subjectAssessmentIds.has(String(m.assessmentId)))
+      .forEach((m) => {
+        const studentIdKey = String(m.studentId);
+        if(!subjectMarksForOtherStudents[studentIdKey]) {
+          subjectMarksForOtherStudents[studentIdKey] = { tot: 0, max: 0 };
+        }
+        const a = assessmentById.get(String(m.assessmentId));
+        if(a) {
+          subjectMarksForOtherStudents[studentIdKey].tot += Number(m.totalMarks ?? m.marksObtained ?? 0);
+          subjectMarksForOtherStudents[studentIdKey].max += Number(a.maxMarks ?? 0);
+        }
     });
     const allPcts = Object.values(subjectMarksForOtherStudents).map(x => x.max > 0 ? +((x.tot/x.max)*100).toFixed(1) : 0).sort((a,b) => a-b);
     let percentile = 100;
@@ -68,7 +95,15 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
     }
 
     return { student, rows, totalMarks, maxPossible, pct, grade: getGrade(pct), progressData, percentile };
-  }, [selectedStudent, selectedSubject, relevantStudents, marks, allAssessments, subjectInfo]);
+  }, [
+    selectedStudent,
+    selectedSubject,
+    relevantStudents,
+    marks,
+    subjectInfo,
+    subjectAssessmentIds,
+    assessmentById,
+  ]);
 
   const [coData, setCoData] = useState([]);
   const [loadingCo, setLoadingCo] = useState(false);
@@ -107,7 +142,7 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
             <Select value={selectedStudent} onValueChange={setSelectedStudent}>
               <SelectTrigger className="rounded-xl h-10 bg-card"><SelectValue placeholder="Choose a student..." /></SelectTrigger>
               <SelectContent>
-                {relevantStudents.map(s => <SelectItem key={s.id} value={s.id}>{s.name} ({s.regNo})</SelectItem>)}
+                {relevantStudents.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name} ({s.regNo})</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

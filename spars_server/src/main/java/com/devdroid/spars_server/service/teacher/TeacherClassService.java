@@ -1,11 +1,13 @@
 package com.devdroid.spars_server.service.teacher;
 
 import com.devdroid.spars_server.dto.AssignmentDTO;
+import com.devdroid.spars_server.dto.AcademicClassDTO;
 import com.devdroid.spars_server.entity.TeacherAssignment;
 import com.devdroid.spars_server.entity.Teacher;
 import com.devdroid.spars_server.exception.ResourceNotFoundException;
 import com.devdroid.spars_server.repository.TeacherAssignmentRepository;
 import com.devdroid.spars_server.repository.TeacherRepository;
+import com.devdroid.spars_server.repository.AcademicClassRepository;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -13,10 +15,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
-public class ClassroomService {
+public class TeacherClassService {
 
     private final TeacherRepository teacherRepository;
     private final TeacherAssignmentRepository teacherAssignmentRepository;
+    private final AcademicClassRepository academicClassRepository;
 
     @Transactional(readOnly = true)
     public List<AssignmentDTO> getMyAssignments(Long teacherId) {
@@ -37,4 +40,28 @@ public class ClassroomService {
                 .classId(assignment.getAcademicClass().getId())
                 .build();
     }
+
+    @Transactional(readOnly = true)
+    public AcademicClassDTO getClassById(Long classId) {
+        return academicClassRepository.findById(classId).map(this::toDto)
+                .orElseThrow(() -> new ResourceNotFoundException("Class not found with id: " + classId));
+    }
+
+    private AcademicClassDTO toDto(com.devdroid.spars_server.entity.AcademicClass academicClass) {
+        int studentCount = academicClass.getStudents() != null ? academicClass.getStudents().size() : 0;
+        List<String> subjectNames = academicClass.getSubjects().stream()
+                .map(com.devdroid.spars_server.entity.Subject::getName)
+                .toList();
+
+        return AcademicClassDTO.builder()
+                .id(academicClass.getId())
+                .branch(academicClass.getBranch())
+                .semester(academicClass.getSemester())
+                .section(academicClass.getSection())
+                .academicYear(academicClass.getAcademicYear())
+                .studentCount(studentCount)
+                .subjects(subjectNames)
+                .build();
+    }
+
 }
