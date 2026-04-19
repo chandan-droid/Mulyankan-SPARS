@@ -49,9 +49,6 @@ public class TeacherClassService {
 
     private AcademicClassDTO toDto(com.devdroid.spars_server.entity.AcademicClass academicClass) {
         int studentCount = academicClass.getStudents() != null ? academicClass.getStudents().size() : 0;
-        List<String> subjectNames = academicClass.getSubjects().stream()
-                .map(com.devdroid.spars_server.entity.Subject::getName)
-                .toList();
 
         return AcademicClassDTO.builder()
                 .id(academicClass.getId())
@@ -60,7 +57,6 @@ public class TeacherClassService {
                 .section(academicClass.getSection())
                 .academicYear(academicClass.getAcademicYear())
                 .studentCount(studentCount)
-                .subjects(subjectNames)
                 .build();
     }
 

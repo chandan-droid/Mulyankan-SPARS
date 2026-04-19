@@ -39,6 +39,5 @@ public class AcademicClass {
     @OneToMany(mappedBy = "academicClass", fetch = FetchType.EAGER)
     private List<Student> students;
 
-    @OneToMany(mappedBy = "academicClass", fetch = FetchType.EAGER)
-    private List<Subject> subjects;
+
 }

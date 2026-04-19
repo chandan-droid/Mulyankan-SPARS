@@ -61,9 +61,9 @@ public class AdminClassService {
 
     private AcademicClassDTO toDto(AcademicClass academicClass) {
         int studentCount = academicClass.getStudents() != null ? academicClass.getStudents().size() : 0;
-        List<String> subjectNames = academicClass.getSubjects().stream()
-                .map(Subject::getName)
-                .toList();
+//        List<String> subjectNames = academicClass.getSubjects().stream()
+//                .map(Subject::getName)
+//                .toList();
 
         return AcademicClassDTO.builder()
                 .id(academicClass.getId())
@@ -72,7 +72,6 @@ public class AdminClassService {
                 .section(academicClass.getSection())
                 .academicYear(academicClass.getAcademicYear())
                 .studentCount(studentCount)
-                .subjects(subjectNames)
                 .build();
     }
 }
