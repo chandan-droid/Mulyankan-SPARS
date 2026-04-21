@@ -234,4 +234,22 @@ public class AdminAnalyticsController {
                 .data(analyticsService.getImprovementTracking())
                 .build());
     }
+
+    @GetMapping("/assessment-types/average-percentage")
+    public ResponseEntity<ApiResponse<List<AssessmentTypeAverageDTO>>> getAssessmentTypeAveragePercentage() {
+        return ResponseEntity.ok(ApiResponse.<List<AssessmentTypeAverageDTO>>builder()
+                .success(true)
+                .message("Assessment type average percentage fetched successfully")
+                .data(analyticsService.getAssessmentTypeAveragePercentage())
+                .build());
+    }
+
+    @GetMapping("/institute/grade-distribution")
+    public ResponseEntity<ApiResponse<List<GradeDistributionDTO>>> getInstituteGradeDistribution() {
+        return ResponseEntity.ok(ApiResponse.<List<GradeDistributionDTO>>builder()
+                .success(true)
+                .message("Institute grade distribution fetched successfully")
+                .data(analyticsService.getInstituteGradeDistribution())
+                .build());
+    }
 }

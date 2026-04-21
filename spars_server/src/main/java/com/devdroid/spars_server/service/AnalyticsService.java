@@ -338,4 +338,39 @@ public class AnalyticsService {
     private double percent(long value, long total) {
         return total == 0 ? 0.0 : (value * 100.0) / total;
     }
+
+    public List<AssessmentTypeAverageDTO> getAssessmentTypeAveragePercentage() {
+        Map<String, List<Mark>> grouped = filterMarks(null, null).stream()
+                .collect(Collectors.groupingBy(
+                        m -> m.getAssessment().getType().name(),
+                        LinkedHashMap::new,
+                        Collectors.toList()));
+
+        return grouped.entrySet().stream()
+                .map(entry -> new AssessmentTypeAverageDTO(entry.getKey(), averagePercentage(entry.getValue())))
+                .sorted(Comparator.comparingDouble(AssessmentTypeAverageDTO::getAveragePercentage).reversed())
+                .collect(Collectors.toList());
+    }
+
+    public List<GradeDistributionDTO> getInstituteGradeDistribution() {
+        Map<String, Long> distribution = studentAnalytics(filterMarks(null, null)).stream()
+                .collect(Collectors.groupingBy(
+                        dto -> gradeFromPercentage(dto.getOverallPercentage()),
+                        LinkedHashMap::new,
+                        Collectors.counting()));
+
+        List<String> gradeOrder = List.of("O", "A", "B", "C", "D", "F");
+        return gradeOrder.stream()
+                .map(grade -> new GradeDistributionDTO(grade, distribution.getOrDefault(grade, 0L)))
+                .collect(Collectors.toList());
+    }
+
+    private String gradeFromPercentage(double percentage) {
+        if (percentage >= 90.0) return "O";
+        if (percentage >= 80.0) return "A";
+        if (percentage >= 70.0) return "B";
+        if (percentage >= 60.0) return "C";
+        if (percentage >= 40.0) return "D";
+        return "F";
+    }
 }
