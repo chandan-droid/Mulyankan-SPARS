@@ -26,4 +26,7 @@ public interface MarkRepository extends JpaRepository<Mark, Long> {
 
     @Query("SELECT m FROM Mark m WHERE m.assessment.id = :assessmentId AND m.student.academicClass.id = :classId")
     List<Mark> findByAssessmentIdAndStudentAcademicClassId(@Param("assessmentId") Long assessmentId, @Param("classId") Long classId);
+
+    @Query("SELECT DISTINCT m.assessment.id FROM Mark m WHERE m.assessment.id IN :assessmentIds")
+    List<Long> findDistinctAssessmentIdsWithRecordedMarks(@Param("assessmentIds") List<Long> assessmentIds);
 }

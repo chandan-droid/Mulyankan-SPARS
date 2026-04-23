@@ -226,6 +226,7 @@ public class AdminAnalyticsController {
                 .build());
     }
 
+
     @GetMapping("/advanced/improvement-tracking")
     public ResponseEntity<ApiResponse<List<ImprovementTrackingDTO>>> getImprovementTracking() {
         return ResponseEntity.ok(ApiResponse.<List<ImprovementTrackingDTO>>builder()
@@ -235,6 +236,7 @@ public class AdminAnalyticsController {
                 .build());
     }
 
+    //asssessment type ~ percentage (institute)
     @GetMapping("/assessment-types/average-percentage")
     public ResponseEntity<ApiResponse<List<AssessmentTypeAverageDTO>>> getAssessmentTypeAveragePercentage() {
         return ResponseEntity.ok(ApiResponse.<List<AssessmentTypeAverageDTO>>builder()
@@ -244,6 +246,7 @@ public class AdminAnalyticsController {
                 .build());
     }
 
+    //institute grade distribution
     @GetMapping("/institute/grade-distribution")
     public ResponseEntity<ApiResponse<List<GradeDistributionDTO>>> getInstituteGradeDistribution() {
         return ResponseEntity.ok(ApiResponse.<List<GradeDistributionDTO>>builder()

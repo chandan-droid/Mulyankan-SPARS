@@ -2,17 +2,21 @@ package com.devdroid.spars_server.controller.teacher;
 
 import com.devdroid.spars_server.dto.ApiResponse;
 import com.devdroid.spars_server.dto.analytics.CoAttainmentComparisonDTO;
+import com.devdroid.spars_server.dto.analytics.AssignmentsByBranchDTO;
+import com.devdroid.spars_server.dto.analytics.MarksEntryProgressSummaryDTO;
 import com.devdroid.spars_server.dto.analytics.OverallPerformanceDTO;
 import com.devdroid.spars_server.dto.analytics.PerformanceDistributionDTO;
 import com.devdroid.spars_server.dto.analytics.ReportFileDTO;
 import com.devdroid.spars_server.dto.analytics.StudentPerformanceDTO;
 import com.devdroid.spars_server.dto.analytics.StudentRiskBandDTO;
 import com.devdroid.spars_server.dto.analytics.TrendPointDTO;
+import com.devdroid.spars_server.security.CustomUserDetails;
 import com.devdroid.spars_server.service.AnalyticsService;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -116,6 +120,28 @@ public class TeacherAnalyticsController {
                 .success(true)
                 .message("Class performance trends fetched successfully")
                 .data(analyticsService.getTeacherPerformanceTrends(classId, subjectId))
+                .build());
+    }
+
+    //shows marks entry progress across assessments in %
+    @GetMapping("/marks-entry-progress")
+    public ResponseEntity<ApiResponse<MarksEntryProgressSummaryDTO>> getMarksEntryProgress(
+            @AuthenticationPrincipal CustomUserDetails currentUser) {
+        return ResponseEntity.ok(ApiResponse.<MarksEntryProgressSummaryDTO>builder()
+                .success(true)
+                .message("Marks entry progress fetched successfully")
+                .data(analyticsService.getTeacherMarksEntryProgress(currentUser.getUser().getId()))
+                .build());
+    }
+
+    //count assignment by branch
+    @GetMapping("/assignments-by-branch")
+    public ResponseEntity<ApiResponse<List<AssignmentsByBranchDTO>>> getAssignmentsByBranch(
+            @AuthenticationPrincipal CustomUserDetails currentUser) {
+        return ResponseEntity.ok(ApiResponse.<List<AssignmentsByBranchDTO>>builder()
+                .success(true)
+                .message("Assignments by branch fetched successfully")
+                .data(analyticsService.getTeacherAssignmentsByBranch(currentUser.getUser().getId()))
                 .build());
     }
 

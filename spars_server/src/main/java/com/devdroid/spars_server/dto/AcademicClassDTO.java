@@ -29,5 +29,6 @@ public class AcademicClassDTO {
     private String academicYear;
 
     private int studentCount;
+
     private List<String> subjects;
 }

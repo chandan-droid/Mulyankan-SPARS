@@ -3,10 +3,12 @@ package com.devdroid.spars_server.service;
 import com.devdroid.spars_server.dto.CoAttainmentDTO;
 import com.devdroid.spars_server.dto.analytics.*;
 import com.devdroid.spars_server.entity.Assessment;
+import com.devdroid.spars_server.entity.AssessmentType;
 import com.devdroid.spars_server.entity.Mark;
 import com.devdroid.spars_server.entity.Student;
 import com.devdroid.spars_server.repository.AssessmentRepository;
 import com.devdroid.spars_server.repository.MarkRepository;
+import com.devdroid.spars_server.repository.TeacherAssignmentRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -19,6 +21,7 @@ public class AnalyticsService {
 
     private final MarkRepository markRepository;
     private final AssessmentRepository assessmentRepository;
+    private final TeacherAssignmentRepository teacherAssignmentRepository;
     private final CoAttainmentService coAttainmentService;
 
     public List<PerformanceDistributionDTO> getPerformanceDistribution(Long assessmentId) {
@@ -288,6 +291,53 @@ public class AnalyticsService {
                 .collect(Collectors.toList());
     }
 
+    public MarksEntryProgressSummaryDTO getTeacherMarksEntryProgress(Long teacherId) {
+        List<Assessment> teacherAssessments = getTeacherAssessments(teacherId);
+        if (teacherAssessments.isEmpty()) {
+            List<MarksEntryProgressDTO> emptyProgress = Arrays.stream(AssessmentType.values())
+                    .map(type -> new MarksEntryProgressDTO(type.name(), 0L, 0L, 0.0))
+                    .collect(Collectors.toList());
+            return new MarksEntryProgressSummaryDTO(0.0, emptyProgress);
+        }
+
+        List<Long> assessmentIds = teacherAssessments.stream()
+                .map(Assessment::getId)
+                .collect(Collectors.toList());
+        Set<Long> recordedAssessmentIds = new HashSet<>(markRepository.findDistinctAssessmentIdsWithRecordedMarks(assessmentIds));
+
+        Map<AssessmentType, Long> totalByType = teacherAssessments.stream()
+                .collect(Collectors.groupingBy(Assessment::getType, Collectors.counting()));
+        Map<AssessmentType, Long> recordedByType = teacherAssessments.stream()
+                .filter(assessment -> recordedAssessmentIds.contains(assessment.getId()))
+                .collect(Collectors.groupingBy(Assessment::getType, Collectors.counting()));
+
+        List<MarksEntryProgressDTO> progress = Arrays.stream(AssessmentType.values())
+                .map(type -> {
+                    long total = totalByType.getOrDefault(type, 0L);
+                    long recorded = recordedByType.getOrDefault(type, 0L);
+                    return new MarksEntryProgressDTO(type.name(), recorded, total, percent(recorded, total));
+                })
+                .collect(Collectors.toList());
+
+        long totalAssessments = teacherAssessments.size();
+        long recordedAssessments = recordedAssessmentIds.size();
+        return new MarksEntryProgressSummaryDTO(percent(recordedAssessments, totalAssessments), progress);
+    }
+
+    public List<AssignmentsByBranchDTO> getTeacherAssignmentsByBranch(Long teacherId) {
+        Map<String, Long> assignmentsByBranch = teacherAssignmentRepository.findByTeacherUserId(teacherId).stream()
+                .collect(Collectors.groupingBy(
+                        assignment -> normalizeBranch(assignment.getAcademicClass().getBranch()),
+                        LinkedHashMap::new,
+                        Collectors.counting()));
+
+        return assignmentsByBranch.entrySet().stream()
+                .map(entry -> new AssignmentsByBranchDTO(entry.getKey(), entry.getValue()))
+                .sorted(Comparator.comparingLong(AssignmentsByBranchDTO::getAssignmentCount).reversed()
+                        .thenComparing(AssignmentsByBranchDTO::getBranch))
+                .collect(Collectors.toList());
+    }
+
     public ReportFileDTO generateTeacherReport(Long classId, Long subjectId, String reportType, String format) {
         String safeType = reportType == null ? "report" : reportType;
         String safeFormat = format == null ? "PDF" : format.toUpperCase();
@@ -297,6 +347,19 @@ public class AnalyticsService {
 
     private List<Mark> filterMarksForClass(Long classId, Long subjectId) {
         return filterMarks(classId, subjectId);
+    }
+
+    private List<Assessment> getTeacherAssessments(Long teacherId) {
+        Map<Long, Assessment> uniqueAssessments = new LinkedHashMap<>();
+        teacherAssignmentRepository.findByTeacherUserId(teacherId)
+                .forEach(assignment -> assessmentRepository
+                        .findByAcademicClassIdAndSubjectId(assignment.getAcademicClass().getId(), assignment.getSubject().getId())
+                        .forEach(assessment -> uniqueAssessments.putIfAbsent(assessment.getId(), assessment)));
+        return new ArrayList<>(uniqueAssessments.values());
+    }
+
+    private String normalizeBranch(String branch) {
+        return branch == null || branch.isBlank() ? "N/A" : branch;
     }
 
     private List<StudentRiskBandDTO> studentAnalytics(List<Mark> marks) {
