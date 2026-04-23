@@ -30,8 +30,7 @@ public class AssessmentService {
     public void createDefaultAssessments(Teacher teacher, Subject subject, AcademicClass academicClass) {
         createAssessment("MidSem Exam", AssessmentType.MIDSEM, 20, subject, academicClass);
         createAssessment("Quiz", AssessmentType.QUIZ, 5, subject, academicClass);
-        createAssessment("Assignment 1", AssessmentType.ASSIGNMENT, 5, subject, academicClass);
-        createAssessment("Assignment 2", AssessmentType.ASSIGNMENT, 5, subject, academicClass);
+        createAssessment("Assignment", AssessmentType.ASSIGNMENT, 10, subject, academicClass);
         createAssessment("Attendance", AssessmentType.ATTENDANCE, 5, subject, academicClass);
     }
 
