@@ -15,6 +15,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   getMyAssignments,
   getMyAssessments,
+  getCachedMyAssignments,
+  getCachedMyAssessments,
   getClassById,
   getStudentsByClass,
   getMarksByAssessment,
@@ -25,7 +27,6 @@ import { useAuth } from '@/contexts/AuthContext';
 
 import TeacherClassTab from './reports/TeacherClassTab';
 import TeacherStudentTab from './reports/TeacherStudentTab';
-import TeacherCOTab from './reports/TeacherCOTab';
 import TeacherDeepDiveTab from './reports/TeacherDeepDiveTab';
 
 function assignmentKey(assignment) {
@@ -59,15 +60,25 @@ function isStudentInAssignment(student, assignment) {
 
 export default function TeacherReports() {
   const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState('classOverview');
   const [selectedAssignmentKey, setSelectedAssignmentKey] = useState('');
-  const [apiAssignments, setApiAssignments] = useState(null); // null = not yet fetched
-  const [apiAssessments, setApiAssessments] = useState([]);
+  const [preselectedStudentId, setPreselectedStudentId] = useState('');
+  const cachedAssignments = useMemo(() => getCachedMyAssignments(), []);
+  const cachedAssessments = useMemo(() => getCachedMyAssessments(), []);
+  const [apiAssignments, setApiAssignments] = useState(
+    cachedAssignments.length > 0 ? cachedAssignments : null
+  ); // null = not yet fetched
+  const [apiAssessments, setApiAssessments] = useState(cachedAssessments);
   const [apiClassStudents, setApiClassStudents] = useState([]);
   const [apiClassMarks, setApiClassMarks] = useState([]);
   const [apiClassQuestionMarks, setApiClassQuestionMarks] = useState([]);
   const [apiClassDetails, setApiClassDetails] = useState(null);
+  // classId -> AcademicClassDTO (branch, semester, section, studentCount, academicYear)
+  const [assignmentClassDetailsMap, setAssignmentClassDetailsMap] = useState({});
   const [classDataLoaded, setClassDataLoaded] = useState(false);
-  const [loadingAssignments, setLoadingAssignments] = useState(true);
+  const [loadingAssignments, setLoadingAssignments] = useState(
+    !(cachedAssignments.length > 0)
+  );
   const [loadingClassData, setLoadingClassData] = useState(false);
 
   // Snapshot local store values with stable references to avoid effect churn.
@@ -84,7 +95,8 @@ export default function TeacherReports() {
   // Fetch assignments from real API, fall back to local store
   useEffect(() => {
     let cancelled = false;
-    setLoadingAssignments(true);
+    const hasWarmStartData = cachedAssignments.length > 0 || localAssignments.length > 0;
+    if (!hasWarmStartData) setLoadingAssignments(true);
     Promise.allSettled([getMyAssignments(), getMyAssessments()])
       .then(([assignmentsRes, assessmentsRes]) => {
         if (cancelled) return;
@@ -119,6 +131,26 @@ export default function TeacherReports() {
     return localAssignments;
   }, [apiAssignments, localAssignments]);
 
+  // Fetch class details for each unique classId in rawAssignments
+  useEffect(() => {
+    if (!rawAssignments.length) return;
+    const uniqueClassIds = [...new Set(rawAssignments.map(a => a.classId).filter(Boolean))];
+    if (!uniqueClassIds.length) return;
+    let cancelled = false;
+    Promise.allSettled(uniqueClassIds.map(id => getClassById(id)))
+      .then(results => {
+        if (cancelled) return;
+        const map = {};
+        results.forEach((r, i) => {
+          if (r.status === 'fulfilled' && r.value) {
+            map[String(uniqueClassIds[i])] = r.value;
+          }
+        });
+        setAssignmentClassDetailsMap(map);
+      });
+    return () => { cancelled = true; };
+  }, [rawAssignments]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const assignedSubjects = useMemo(() => {
     const seen = new Set();
     return rawAssignments.reduce((acc, a) => {
@@ -127,15 +159,22 @@ export default function TeacherReports() {
       seen.add(key);
 
       const s = allSubjects.find((sub) => sub.id === a.subjectId);
+      // Enrich branch/semester/section from API class details when assignment has nulls
+      const cd = assignmentClassDetailsMap[String(a.classId ?? '')] ?? {};
       acc.push({
         ...a,
+        branch:   cd.branch   ?? a.branch   ?? '',
+        semester: cd.semester ?? a.semester ?? '',
+        section:  cd.section  ?? a.section  ?? '',
+        academicYear: cd.academicYear ?? a.academicYear ?? a.academic_year ?? '',
+        studentCount: cd.studentCount ?? null,
         key,
         subjectName: s?.subjectName || '',
         subjectCode: s?.subjectCode || '',
       });
       return acc;
     }, []);
-  }, [rawAssignments, allSubjects]);
+  }, [rawAssignments, allSubjects, assignmentClassDetailsMap]);
 
   useEffect(() => {
     if (!assignedSubjects.length) {
@@ -156,6 +195,16 @@ export default function TeacherReports() {
   const selectedSubject = currentAssignment?.subjectId ? String(currentAssignment.subjectId) : '';
   const currentAssignmentKey = currentAssignment?.key || '';
   const currentAssignmentClassId = currentAssignment?.classId ?? null;
+
+  const handleOpenStudentReport = (studentId) => {
+    if (studentId == null) return;
+    setPreselectedStudentId(String(studentId));
+    setActiveTab('student');
+  };
+
+  useEffect(() => {
+    setPreselectedStudentId('');
+  }, [currentAssignmentKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -193,8 +242,18 @@ export default function TeacherReports() {
 
         const sourceAssessments = apiAssessments.length > 0 ? apiAssessments : allAssessments;
         const matchedAssessments = sourceAssessments.filter((assessment) => {
-          if (String(assessment.subjectId) !== String(currentAssignment.subjectId)) return false;
-          return isSameAssignmentClass(assessment, currentAssignment);
+          if (!isSameAssignmentClass(assessment, currentAssignment)) return false;
+
+          const assessmentType = String(assessment.type || '').toUpperCase().replace(/\s+/g, '');
+          const isAttendanceAssessment =
+            assessmentType === 'ATTENDANCE' ||
+            assessmentType === 'ATTENDENCE' ||
+            assessmentType === 'ATT';
+
+          // Attendance can be class-scoped on some payloads (subjectId null/different).
+          if (isAttendanceAssessment) return true;
+
+          return String(assessment.subjectId) === String(currentAssignment.subjectId);
         });
 
         const marksSettled = await Promise.allSettled(
@@ -263,15 +322,17 @@ export default function TeacherReports() {
 
   const currentClassInfo = useMemo(() => {
     const classDetails = apiClassDetails ?? {};
+    // Also read from the assignment-level classDetailsMap as a richer fallback
+    const cdMap = assignmentClassDetailsMap[String(currentAssignment?.classId ?? '')] ?? {};
     return {
-      branch: classDetails.branch ?? currentAssignment?.branch ?? '',
-      semester: classDetails.semester ?? currentAssignment?.semester ?? '',
-      section: classDetails.section ?? currentAssignment?.section ?? '',
-      academicYear: classDetails.academicYear ?? classDetails.academic_year ?? currentAssignment?.academic_year ?? '',
-      studentCount: Number(classDetails.studentCount ?? apiClassStudents.length ?? 0),
-      subjects: Array.isArray(classDetails.subjects) ? classDetails.subjects : [],
+      branch:      classDetails.branch      ?? cdMap.branch      ?? currentAssignment?.branch      ?? '',
+      semester:    classDetails.semester    ?? cdMap.semester    ?? currentAssignment?.semester    ?? '',
+      section:     classDetails.section     ?? cdMap.section     ?? currentAssignment?.section     ?? '',
+      academicYear: classDetails.academicYear ?? cdMap.academicYear ?? currentAssignment?.academicYear ?? currentAssignment?.academic_year ?? '',
+      studentCount: Number(classDetails.studentCount ?? cdMap.studentCount ?? apiClassStudents.length ?? 0),
+      subjects:    Array.isArray(classDetails.subjects) ? classDetails.subjects : [],
     };
-  }, [apiClassDetails, currentAssignment, apiClassStudents.length]);
+  }, [apiClassDetails, assignmentClassDetailsMap, currentAssignment, apiClassStudents.length]);
 
   const relevantStudents = useMemo(() => {
     if (!currentAssignment) return [];
@@ -346,29 +407,29 @@ export default function TeacherReports() {
                  </div>
                </SelectTrigger>
                <SelectContent>
-                 {assignedSubjects.map((s) => (
-                   <SelectItem key={s.key} value={s.key}>
-                     <div className="flex flex-col text-left">
-                       <span className="font-medium text-sm">{s.subjectCode} - {s.subjectName}</span>
-                       <span className="text-[10px] text-muted-foreground uppercase tracking-wider">{s.branch} • Sem {s.semester} • Sec {s.section}</span>
-                     </div>
-                   </SelectItem>
-                 ))}
+                  {assignedSubjects.map((s) => (
+                    <SelectItem key={s.key} value={s.key}>
+                      <div className="flex flex-col text-left">
+                        <span className="font-medium text-sm">{s.subjectCode} - {s.subjectName}</span>
+                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                          {s.branch || '—'} &bull; Sem {s.semester || '—'} &bull; Sec {s.section || '—'}
+                          {s.studentCount != null ? ` • ${s.studentCount} stu.` : ''}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
                </SelectContent>
              </Select>
           </div>
         </div>
 
-        <Tabs defaultValue="classOverview" className="space-y-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="bg-sky-50 border border-sky-100 p-1 rounded-xl flex flex-wrap h-auto gap-1">
             <TabsTrigger value="classOverview" className="rounded-lg text-xs font-semibold text-sky-700 data-[state=active]:bg-white data-[state=active]:shadow-sm">
               🏫 Class Overview
             </TabsTrigger>
             <TabsTrigger value="student" className="rounded-lg text-xs font-semibold text-violet-700 data-[state=active]:bg-white data-[state=active]:shadow-sm">
               👤 Student Report
-            </TabsTrigger>
-            <TabsTrigger value="co" className="rounded-lg text-xs font-semibold text-emerald-700 data-[state=active]:bg-white data-[state=active]:shadow-sm">
-              🎯 CO Analysis
             </TabsTrigger>
             <TabsTrigger value="deepdive" className="rounded-lg text-xs font-semibold text-fuchsia-700 data-[state=active]:bg-white data-[state=active]:shadow-sm">
               🔍 Assessment Deep Dive
@@ -377,14 +438,19 @@ export default function TeacherReports() {
 
         <TabsContent value="classOverview" className="mt-6">
            {selectedSubject ? (
-             <TeacherClassTab
-               reportData={reportData}
-               selectedSubject={selectedSubject}
-               relevantStudents={relevantStudents}
-              branch={currentClassInfo.branch}
-              semester={currentClassInfo.semester}
-              section={currentClassInfo.section}
-             />
+             <div className="space-y-8">
+               <TeacherClassTab
+                 reportData={reportData}
+                 selectedSubject={selectedSubject}
+                 relevantStudents={relevantStudents}
+                branch={currentClassInfo.branch}
+                semester={currentClassInfo.semester}
+                section={currentClassInfo.section}
+                studentCount={currentClassInfo.studentCount || null}
+                academicYear={currentClassInfo.academicYear}
+                  onOpenStudentReport={handleOpenStudentReport}
+               />
+             </div>
            ) : (
              <div className="text-center py-24 text-muted-foreground"><BookOpen className="h-10 w-10 mx-auto mb-3 opacity-20" />Select a Class/Subject above to view reports.</div>
            )}
@@ -397,28 +463,13 @@ export default function TeacherReports() {
                selectedSubject={selectedSubject}
                relevantStudents={relevantStudents}
                subjectInfo={subjectInfo}
+               preselectedStudentId={preselectedStudentId}
              />
            ) : (
              <div className="text-center py-24 text-muted-foreground"><BookOpen className="h-10 w-10 mx-auto mb-3 opacity-20" />Select a Class/Subject above to view reports.</div>
            )}
         </TabsContent>
 
-        <TabsContent value="co" className="mt-6">
-           {selectedSubject ? (
-             <TeacherCOTab
-               reportData={reportData}
-               selectedSubject={selectedSubject}
-               relevantStudents={relevantStudents}
-              branch={currentClassInfo.branch}
-              semester={currentClassInfo.semester}
-              section={currentClassInfo.section}
-               classId={currentAssignment?.classId}
-             />
-           ) : (
-             <div className="text-center py-24 text-muted-foreground"><BookOpen className="h-10 w-10 mx-auto mb-3 opacity-20" />Select a Class/Subject above to view reports.</div>
-           )}
-        </TabsContent>
-        
         <TabsContent value="deepdive" className="mt-6">
            {selectedSubject ? (
              <TeacherDeepDiveTab reportData={reportData} selectedSubject={selectedSubject} relevantStudents={relevantStudents} />
@@ -426,6 +477,7 @@ export default function TeacherReports() {
              <div className="text-center py-24 text-muted-foreground"><BookOpen className="h-10 w-10 mx-auto mb-3 opacity-20" />Select a Class/Subject above to view reports.</div>
            )}
         </TabsContent>
+
         </Tabs>
       </div>
     </DashboardLayout>

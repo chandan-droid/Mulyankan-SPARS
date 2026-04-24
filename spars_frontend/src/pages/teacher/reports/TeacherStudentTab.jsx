@@ -15,7 +15,7 @@ function PerformBadge({ pct }) {
   return <Badge variant="outline" className={`text-[10px] font-semibold ${color}`}>{pct.toFixed(1)}%</Badge>;
 }
 
-export default function TeacherStudentTab({ reportData, selectedSubject, relevantStudents, subjectInfo }) {
+export default function TeacherStudentTab({ reportData, selectedSubject, relevantStudents, subjectInfo, preselectedStudentId = '' }) {
   const allAssessments = reportData?.assessments ?? [];
   const marks = Array.isArray(reportData?.marks) ? reportData.marks : [];
   const questionMarks = Array.isArray(reportData?.questionMarks) ? reportData.questionMarks : [];
@@ -109,6 +109,16 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
   const [loadingCo, setLoadingCo] = useState(false);
 
   useEffect(() => {
+    if (!preselectedStudentId) return;
+    const exists = relevantStudents.some(
+      (student) => String(student.id) === String(preselectedStudentId)
+    );
+    if (exists) {
+      setSelectedStudent(String(preselectedStudentId));
+    }
+  }, [preselectedStudentId, relevantStudents]);
+
+  useEffect(() => {
     if (!selectedStudent || !selectedSubject) {
       setCoData([]);
       return;
@@ -195,20 +205,13 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      {['Type', 'Score Details', 'Marks', 'Max', 'Percentage'].map(h => <TableHead key={h} className="font-semibold text-xs uppercase tracking-wider text-muted-foreground/70">{h}</TableHead>)}
+                      {['Type', 'Marks', 'Max', 'Percentage'].map(h => <TableHead key={h} className="font-semibold text-xs uppercase tracking-wider text-muted-foreground/70">{h}</TableHead>)}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {report.rows.map((m, i) => (
                       <TableRow key={i} className="hover:bg-primary/[0.02]">
                         <TableCell><Badge variant="outline" className="text-[10px] bg-primary/5 text-primary border-primary/15">{m.type}</Badge></TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {String(m.type).toUpperCase() === 'QUIZ' ? (
-                            <Badge variant="secondary" className="bg-primary/10 border-primary/20 text-primary">
-                              Quiz: {m.quizMarks}
-                            </Badge>
-                          ) : '—'}
-                        </TableCell>
                         <TableCell className="font-semibold text-sm">{m.marks}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">{m.maxMarks}</TableCell>
                         <TableCell><PerformBadge pct={m.percentage} /></TableCell>

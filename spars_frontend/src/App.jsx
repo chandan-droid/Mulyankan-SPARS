@@ -16,6 +16,7 @@ import AdminReports from './pages/admin/Reports';
 import TeacherDashboard from './pages/teacher/Dashboard';
 import MarkEntry from './pages/teacher/MarkEntry';
 import TeacherReports from './pages/teacher/Reports';
+import AssignedClasses from './pages/teacher/AssignedClasses';
 import Settings from './pages/Settings';
 import NotFound from './pages/NotFound';
 import { adminNavItems } from './pages/admin/Dashboard';
@@ -121,6 +122,14 @@ const App = () => (
               element={
                 <ProtectedRoute role="teacher">
                   <TeacherReports />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/classes"
+              element={
+                <ProtectedRoute role="teacher">
+                  <AssignedClasses />
                 </ProtectedRoute>
               }
             />

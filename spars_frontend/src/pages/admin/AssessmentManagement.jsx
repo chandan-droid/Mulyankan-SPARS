@@ -2,8 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { adminNavItems } from './Dashboard';
 import {
+  getCachedAdminAssessments,
+  getCachedAdminClasses,
+  getCachedAdminMarks,
+  getCachedAdminSubjects,
   getAdminAssessments,
   getAdminClasses,
+  getAdminMarks,
   getAdminSubjects,
   updateAdminAssessment,
 } from '@/lib/adminApi';
@@ -51,16 +56,23 @@ function classLabel(item) {
 }
 
 export default function AssessmentManagement() {
-  const [classes, setClasses] = useState([]);
-  const [subjects, setSubjects] = useState([]);
-  const [assessments, setAssessments] = useState([]);
+  const cachedClasses = useMemo(() => getCachedAdminClasses(), []);
+  const cachedSubjects = useMemo(() => getCachedAdminSubjects(), []);
+  const cachedAssessments = useMemo(() => getCachedAdminAssessments(), []);
+  const cachedMarks = useMemo(() => getCachedAdminMarks(), []);
+  const [classes, setClasses] = useState(cachedClasses);
+  const [subjects, setSubjects] = useState(cachedSubjects);
+  const [assessments, setAssessments] = useState(cachedAssessments);
+  const [marks, setMarks] = useState(cachedMarks);
 
   const [selectedClassId, setSelectedClassId] = useState('all');
   const [selectedSubjectId, setSelectedSubjectId] = useState('all');
   const [selectedType, setSelectedType] = useState('all');
   const [searchText, setSearchText] = useState('');
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(
+    !(cachedClasses.length > 0 || cachedSubjects.length > 0 || cachedAssessments.length > 0)
+  );
 
   const [editingAssessment, setEditingAssessment] = useState(null);
   const [editForm, setEditForm] = useState({
@@ -171,18 +183,32 @@ export default function AssessmentManagement() {
       });
   }, [filteredAssessments, classById, subjectById]);
 
-  const fetchAll = async () => {
+  const marksCountByAssessment = useMemo(() => {
+    const map = new Map();
+    marks.forEach((mark) => {
+      const key = String(mark.assessmentId ?? '');
+      if (!key) return;
+      map.set(key, (map.get(key) || 0) + 1);
+    });
+    return map;
+  }, [marks]);
+
+  const fetchAll = async (silent = false) => {
     try {
-      setLoading(true);
-      const [classData, subjectData, assessmentData] = await Promise.all([
+      if (!silent || !(classes.length > 0 || subjects.length > 0 || assessments.length > 0)) {
+        setLoading(true);
+      }
+      const [classData, subjectData, assessmentData, marksData] = await Promise.all([
         getAdminClasses(),
         getAdminSubjects(),
         getAdminAssessments(),
+        getAdminMarks(),
       ]);
 
       setClasses(classData || []);
       setSubjects(subjectData || []);
       setAssessments(assessmentData || []);
+      setMarks(marksData || []);
     } catch (error) {
       toast.error(error?.message || 'Unable to load assessment data');
     } finally {
@@ -191,7 +217,7 @@ export default function AssessmentManagement() {
   };
 
   useEffect(() => {
-    fetchAll();
+    fetchAll(true);
   }, []);
 
   const handleOpenEdit = (assessment) => {
@@ -401,15 +427,17 @@ export default function AssessmentManagement() {
           </div>
         </div>
         
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          className="h-8 px-3 rounded-lg text-xs font-semibold hover:bg-primary hover:text-primary-foreground transition-all"
-          onClick={() => handleOpenEdit(item)}
-        >
-          Reschedule
-        </Button>
+        {(() => {
+          const hasMarksRecorded = (marksCountByAssessment.get(String(item.id)) || 0) > 0;
+          return (
+            <Badge
+              variant="outline"
+              className={`text-[10px] font-semibold ${hasMarksRecorded ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}
+            >
+              {hasMarksRecorded ? 'Marks Recorded' : 'Marks Not Recorded'}
+            </Badge>
+          );
+        })()}
       </div>
     </div>
   ))}

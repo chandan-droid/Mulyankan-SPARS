@@ -208,8 +208,8 @@ export default function DashboardLayout({ children, navItems }) {
             })}
           </div>
 
-          {/* Divider + Utility nav */}
-          <div className={`mt-4 pt-4 border-t border-white/[0.06] ${isCollapsed ? '' : ''}`}>
+          {/* TEMPORARILY COMMENTED OUT: Settings nav item */}
+          {/* <div className={`mt-4 pt-4 border-t border-white/[0.06] ${isCollapsed ? '' : ''}`}>
             {!isCollapsed ? (
               <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/20">
                 System
@@ -230,7 +230,7 @@ export default function DashboardLayout({ children, navItems }) {
               </div>
               {!isCollapsed ? <span className="flex-1 text-left">Settings</span> : null}
             </button>
-          </div>
+          </div> */}
         </nav>
 
         {/* User footer */}

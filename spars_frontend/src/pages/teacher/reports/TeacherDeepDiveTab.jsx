@@ -1,117 +1,167 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RTC, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
-import { Search, Trophy, AlertTriangle } from 'lucide-react';
+import { Search, Trophy, AlertTriangle, Loader2, BarChart3 } from 'lucide-react';
+import { getPerformanceDistribution } from '@/lib/teacherApi';
+
+const DISTRIBUTION_COLORS = [
+  'hsl(235,65%,58%)', 'hsl(168,60%,48%)', 'hsl(35,95%,58%)',
+  'hsl(0,72%,55%)', 'hsl(215,90%,56%)', 'hsl(280,65%,55%)',
+];
 
 export default function TeacherDeepDiveTab({ reportData, selectedSubject, relevantStudents }) {
   const marksData = Array.isArray(reportData?.marks) ? reportData.marks : [];
   const allAssessments = reportData?.assessments ?? [];
   const [selectedAssesmentId, setSelectedAssesmentId] = useState('');
+  const [distribution, setDistribution] = useState([]);
+  const [distLoading, setDistLoading] = useState(false);
 
   const subjectAssessments = useMemo(() => {
     if (!selectedSubject) return [];
-    return allAssessments.filter(a => a.subjectId === selectedSubject);
+    return allAssessments.filter((a) => String(a.subjectId) === String(selectedSubject));
   }, [selectedSubject, allAssessments]);
+
+  useEffect(() => {
+    if (!subjectAssessments.length) {
+      setSelectedAssesmentId('');
+      return;
+    }
+    const hasSelection = subjectAssessments.some(
+      (assessment) => String(assessment.id) === String(selectedAssesmentId)
+    );
+    if (!hasSelection) {
+      setSelectedAssesmentId(String(subjectAssessments[0].id));
+    }
+  }, [subjectAssessments, selectedAssesmentId]);
 
   const deepDiveReport = useMemo(() => {
     if (!selectedAssesmentId || !selectedSubject) return null;
-    const a = subjectAssessments.find(x => x.id === selectedAssesmentId);
+    const a = subjectAssessments.find(x => String(x.id) === String(selectedAssesmentId));
     if (!a) return null;
 
-    const classStudentIds = relevantStudents.map(s => s.id);
-    const filteredMarks = marksData.filter(m => m.assessmentId === selectedAssesmentId && classStudentIds.includes(m.studentId));
+    const classStudentIds = new Set(relevantStudents.map((s) => String(s.id)));
+    const filteredMarks = marksData.filter(
+      (m) =>
+        String(m.assessmentId) === String(selectedAssesmentId) &&
+        classStudentIds.has(String(m.studentId))
+    );
 
-    const rows = filteredMarks.map(m => {
-      const student = relevantStudents.find(s => s.id === m.studentId);
+    const rows = filteredMarks.map((m) => {
+      const student = relevantStudents.find((s) => String(s.id) === String(m.studentId));
+      if (!student) return null;
       const totalMarks = m.totalMarks ?? m.marksObtained ?? 0;
       const pct = a.maxMarks > 0 ? +((totalMarks / a.maxMarks) * 100).toFixed(1) : 0;
       return { student, marks: totalMarks, pct };
-    }).sort((a,b) => b.marks - a.marks);
+    }).filter(Boolean).sort((a,b) => b.marks - a.marks);
 
     const avgPct = rows.length > 0 ? +(rows.reduce((s, r) => s + r.pct, 0) / rows.length).toFixed(1) : 0;
     const isOutlierTop = (idx) => idx < Math.ceil(rows.length * 0.1); 
     const isOutlierBottom = (idx) => idx >= rows.length - Math.ceil(rows.length * 0.1);
 
-    // Dynamic Histogram Buckets based on max marks
-    const numBuckets = 10;
-    const bucketSize = a.maxMarks / numBuckets;
-    const buckets = Array(numBuckets).fill(0);
-    
-    rows.forEach(r => {
-      let bIdx = Math.floor(r.marks / bucketSize);
-      if (bIdx >= numBuckets) bIdx = numBuckets - 1;
-      buckets[bIdx]++;
-    });
-
-    const distData = buckets.map((c, i) => ({
-      range: `${(i*bucketSize).toFixed(1)}-${((i+1)*bucketSize).toFixed(1)}`,
-      count: c
-    }));
-
-    return { a, rows, avgPct, distData, isOutlierTop, isOutlierBottom, maxMarks: a.maxMarks };
+    return { a, rows, avgPct, isOutlierTop, isOutlierBottom };
   }, [selectedAssesmentId, selectedSubject, subjectAssessments, relevantStudents, marksData]);
+
+  useEffect(() => {
+    if (!selectedAssesmentId) {
+      setDistribution([]);
+      return;
+    }
+
+    let cancel = false;
+    setDistLoading(true);
+    getPerformanceDistribution(selectedAssesmentId)
+      .then((data) => {
+        if (cancel) return;
+        setDistribution(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (!cancel) setDistribution([]);
+      })
+      .finally(() => {
+        if (!cancel) setDistLoading(false);
+      });
+
+    return () => {
+      cancel = true;
+    };
+  }, [selectedAssesmentId]);
 
   if (!selectedSubject) return null;
 
   return (
     <div className="space-y-6 animate-fade-in-up">
-      <Card className="glass-card">
-        <CardContent className="p-6">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60 mb-4">Select Assessment</p>
-          <div className="max-w-xs">
-            <Select value={selectedAssesmentId} onValueChange={setSelectedAssesmentId}>
-              <SelectTrigger className="rounded-xl h-10 bg-card"><SelectValue placeholder="Choose assessment..." /></SelectTrigger>
-              <SelectContent>
-                {subjectAssessments.map(s => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.type} - {s.name || s.date || 'Assessment'}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
       {!deepDiveReport && (
         <div className="text-center py-20 text-muted-foreground"><Search className="h-10 w-10 mx-auto mb-3 opacity-20" />Select an assessment to dive deep.</div>
       )}
 
-      {deepDiveReport && (
-        <div className="space-y-6">
-          <div className="grid gap-6 lg:grid-cols-2">
-            <Card className="glass-card">
-              <CardHeader><CardTitle className="text-sm font-heading font-semibold">Score Distribution (Max: {deepDiveReport.maxMarks})</CardTitle></CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={deepDiveReport.distData} barGap={4}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(225,14%,90%)" vertical={false} />
+      {subjectAssessments.length > 0 && (
+        <Card className="glass-card overflow-hidden">
+          <CardHeader className="pb-0">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <CardTitle className="text-sm font-heading font-semibold flex items-center gap-2">
+                <BarChart3 className="h-4 w-4 text-sky-500" />
+                Score Distribution by Assessment
+              </CardTitle>
+              <Select value={selectedAssesmentId} onValueChange={setSelectedAssesmentId}>
+                <SelectTrigger className="w-full sm:w-56 h-9 rounded-xl text-xs bg-background/50">
+                  <SelectValue placeholder="Select Assessment" />
+                </SelectTrigger>
+                <SelectContent>
+                  {subjectAssessments.map((assessment) => (
+                    <SelectItem key={assessment.id} value={String(assessment.id)}>
+                      {assessment.name || assessment.type} ({assessment.type})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-4">
+            {distLoading ? (
+              <div className="flex py-10 justify-center">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              </div>
+            ) : distribution.length > 0 ? (
+              <div className="h-[220px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={distribution} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(225,14%,90%)" />
                     <XAxis dataKey="range" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} />
                     <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
-                    <RTC contentStyle={{ borderRadius: '12px' }} />
-                    <Bar dataKey="count" name="Students" fill="hsl(215,90%,56%)" radius={[6,6,0,0]} />
+                    <RTC formatter={(v) => [`${v} students`, 'Count']} />
+                    <Bar dataKey="studentCount" name="Students" radius={[6, 6, 0, 0]} barSize={32}>
+                      {distribution.map((_, i) => (
+                        <Cell key={i} fill={DISTRIBUTION_COLORS[i % DISTRIBUTION_COLORS.length]} />
+                      ))}
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground text-center py-8">No distribution data for this assessment.</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {deepDiveReport && (
+        <div className="space-y-6">
+          <div className="space-y-6">
+            <Card className="glass-card">
+              <CardContent className="p-5 flex flex-col justify-center items-center h-full min-h-[140px]">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/60 mb-1">Class Average for this Assessment</p>
+                <p className="text-4xl font-heading font-bold text-foreground">{deepDiveReport.avgPct}%</p>
               </CardContent>
             </Card>
-
-            <div className="space-y-6">
-               <Card className="glass-card">
-                  <CardContent className="p-5 flex flex-col justify-center items-center h-full min-h-[140px]">
-                     <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/60 mb-1">Class Average for this Assessment</p>
-                     <p className="text-4xl font-heading font-bold text-foreground">{deepDiveReport.avgPct}%</p>
-                  </CardContent>
-               </Card>
-               <div className="flex gap-4 p-4 rounded-xl border border-primary/20 bg-primary/5 items-center">
-                 <Trophy className="h-5 w-5 text-amber-500" />
-                 <p className="text-sm font-medium">Top 10% outlier students highlighted in <span className="text-emerald-600 font-bold">Green</span>.</p>
-               </div>
-               <div className="flex gap-4 p-4 rounded-xl border border-destructive/20 bg-destructive/5 items-center">
-                 <AlertTriangle className="h-5 w-5 text-red-500" />
-                 <p className="text-sm font-medium">Bottom 10% outlier students highlighted in <span className="text-red-500 font-bold">Red</span>.</p>
-               </div>
+            <div className="flex gap-4 p-4 rounded-xl border border-primary/20 bg-primary/5 items-center">
+              <Trophy className="h-5 w-5 text-amber-500" />
+              <p className="text-sm font-medium">Top 10% outlier students highlighted in <span className="text-emerald-600 font-bold">Green</span>.</p>
+            </div>
+            <div className="flex gap-4 p-4 rounded-xl border border-destructive/20 bg-destructive/5 items-center">
+              <AlertTriangle className="h-5 w-5 text-red-500" />
+              <p className="text-sm font-medium">Bottom 10% outlier students highlighted in <span className="text-red-500 font-bold">Red</span>.</p>
             </div>
           </div>
 

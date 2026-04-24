@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { adminNavItems } from './Dashboard';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -14,6 +14,14 @@ import {
   getTeacherAssignments,
 } from '@/data/store';
 import {
+  getCachedAdminAssessments,
+  getCachedAdminClasses,
+  getCachedAdminMarks,
+  getCachedAdminQuestionMarks,
+  getCachedAdminStudents,
+  getCachedAdminSubjects,
+  getCachedAdminTeacherAssignments,
+  getCachedAdminTeachers,
   getAdminStudents,
   getAdminSubjects,
   getAdminClasses,
@@ -24,27 +32,62 @@ import {
   getAdminTeacherAssignments,
 } from '@/lib/adminApi';
 import AdminAnalyticsTab from './reports/AdminAnalyticsTab';
-import AdminStudentTab from './reports/AdminStudentTab';
 import AdminClassTab from './reports/AdminClassTab';
+import AdminStudentTab from './reports/AdminStudentTab';
 import AdminSubjectTab from './reports/AdminSubjectTab';
 import AdminBranchTab from './reports/AdminBranchTab';
-import AdminTeacherTab from './reports/AdminTeacherTab';
 
 export default function AdminReports() {
-  const [loadingData, setLoadingData] = useState(true);
-  const [reportData, setReportData] = useState(() => ({
-    students: getStudents(),
-    subjects: getSubjects(),
-    classes: getClasses(),
-    assessments: getAssessments(),
-    marks: getMarks(),
-    questionMarks: getQuestionMarks(),
-    teachers: getTeachers(),
-    assignments: getTeacherAssignments(),
-  }));
+  const [activeTab, setActiveTab] = useState('class');
+  const [deepLinkStudentId, setDeepLinkStudentId] = useState(null);
+  const warmReportData = useMemo(() => {
+    const localData = {
+      students: getStudents(),
+      subjects: getSubjects(),
+      classes: getClasses(),
+      assessments: getAssessments(),
+      marks: getMarks(),
+      questionMarks: getQuestionMarks(),
+      teachers: getTeachers(),
+      assignments: getTeacherAssignments(),
+    };
+
+    const cachedData = {
+      students: getCachedAdminStudents(),
+      subjects: getCachedAdminSubjects(),
+      classes: getCachedAdminClasses(),
+      assessments: getCachedAdminAssessments(),
+      marks: getCachedAdminMarks(),
+      questionMarks: getCachedAdminQuestionMarks(),
+      teachers: getCachedAdminTeachers(),
+      assignments: getCachedAdminTeacherAssignments(),
+    };
+
+    return {
+      students: cachedData.students.length > 0 ? cachedData.students : localData.students,
+      subjects: cachedData.subjects.length > 0 ? cachedData.subjects : localData.subjects,
+      classes: cachedData.classes.length > 0 ? cachedData.classes : localData.classes,
+      assessments: cachedData.assessments.length > 0 ? cachedData.assessments : localData.assessments,
+      marks: cachedData.marks.length > 0 ? cachedData.marks : localData.marks,
+      questionMarks:
+        cachedData.questionMarks.length > 0 ? cachedData.questionMarks : localData.questionMarks,
+      teachers: cachedData.teachers.length > 0 ? cachedData.teachers : localData.teachers,
+      assignments:
+        cachedData.assignments.length > 0 ? cachedData.assignments : localData.assignments,
+    };
+  }, []);
+
+  const [loadingData, setLoadingData] = useState(
+    !Object.values(warmReportData).some((arr) => Array.isArray(arr) && arr.length > 0)
+  );
+  const [reportData, setReportData] = useState(warmReportData);
 
   useEffect(() => {
     let cancelled = false;
+    const hasWarmStartData = Object.values(warmReportData).some(
+      (arr) => Array.isArray(arr) && arr.length > 0
+    );
+    if (!hasWarmStartData) setLoadingData(true);
 
     const loadReportData = async () => {
       const localData = {
@@ -65,7 +108,6 @@ export default function AdminReports() {
           classesRes,
           assessmentsRes,
           marksRes,
-          questionMarksRes,
           teachersRes,
           assignmentsRes,
         ] = await Promise.allSettled([
@@ -74,7 +116,6 @@ export default function AdminReports() {
           getAdminClasses(),
           getAdminAssessments(),
           getAdminMarks(),
-          getAdminQuestionMarks(),
           getAdminTeachers(),
           getAdminTeacherAssignments(),
         ]);
@@ -139,13 +180,27 @@ export default function AdminReports() {
           };
         });
 
-        const questionMarks =
-          questionMarksRes.status === 'fulfilled' && Array.isArray(questionMarksRes.value)
-            ? questionMarksRes.value.map((item) => ({
-                ...item,
-                obtainedMarks: item.obtainedMarks ?? item.marksObtained ?? 0,
-              }))
-            : localData.questionMarks;
+        const midsemAssessmentIds = new Set(
+          assessments
+            .filter((assessment) => String(assessment.type).toUpperCase() === 'MIDSEM')
+            .map((assessment) => String(assessment.id))
+        );
+        const midsemMarkIds = marks
+          .filter((mark) => midsemAssessmentIds.has(String(mark.assessmentId)))
+          .map((mark) => mark.id)
+          .filter(Boolean);
+
+        const questionMarksSettled = await Promise.allSettled(
+          midsemMarkIds.map((markId) => getAdminQuestionMarks({ markId }))
+        );
+
+        const questionMarks = questionMarksSettled
+          .filter((result) => result.status === 'fulfilled' && Array.isArray(result.value))
+          .flatMap((result) => result.value)
+          .map((item) => ({
+            ...item,
+            obtainedMarks: item.obtainedMarks ?? item.marksObtained ?? 0,
+          }));
 
         const teachers =
           teachersRes.status === 'fulfilled' && Array.isArray(teachersRes.value)
@@ -189,7 +244,7 @@ export default function AdminReports() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [warmReportData]);
 
   return (
     <DashboardLayout navItems={adminNavItems}>
@@ -216,38 +271,38 @@ export default function AdminReports() {
         )}
       </div>
 
-      <Tabs defaultValue="analytics" className="space-y-6">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="bg-muted/50 border border-border/50 p-1 rounded-xl flex flex-wrap h-auto gap-1">
-          <TabsTrigger value="analytics" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
-            📊 Analytics
+          <TabsTrigger value="class" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
+            Class Overview
           </TabsTrigger>
           <TabsTrigger value="student" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
-            👤 Student-wise
+            Student Report
           </TabsTrigger>
-          <TabsTrigger value="class" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
-            🏫 Class-wise
+          <TabsTrigger value="analytics" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
+            Analytics
           </TabsTrigger>
           <TabsTrigger value="subject" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
-            📚 Subject-wise
+            Subject-wise
           </TabsTrigger>
-          <TabsTrigger value="branch" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
-            🌿 Branch View
-          </TabsTrigger>
-          <TabsTrigger value="teacher" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
-            👨‍🏫 Teacher View
-          </TabsTrigger>
+          {/* <TabsTrigger value="branch" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
+            Branch View
+          </TabsTrigger> */}
         </TabsList>
 
-        <TabsContent value="analytics" className="animate-fade-in-up mt-6">
-          <AdminAnalyticsTab reportData={reportData} />
+        <TabsContent value="class" className="animate-fade-in-up mt-6">
+          <AdminClassTab reportData={reportData} onNavigateToStudent={(studentId) => {
+            setDeepLinkStudentId(String(studentId));
+            setActiveTab('student');
+          }} />
         </TabsContent>
 
         <TabsContent value="student" className="animate-fade-in-up mt-6">
-          <AdminStudentTab reportData={reportData} />
+          <AdminStudentTab reportData={reportData} deepLinkStudentId={deepLinkStudentId} onDeepLinkConsumed={() => setDeepLinkStudentId(null)} />
         </TabsContent>
 
-        <TabsContent value="class" className="animate-fade-in-up mt-6">
-          <AdminClassTab reportData={reportData} />
+        <TabsContent value="analytics" className="animate-fade-in-up mt-6">
+          <AdminAnalyticsTab reportData={reportData} />
         </TabsContent>
 
         <TabsContent value="subject" className="animate-fade-in-up mt-6">
@@ -256,10 +311,6 @@ export default function AdminReports() {
 
         <TabsContent value="branch" className="animate-fade-in-up mt-6">
           <AdminBranchTab reportData={reportData} />
-        </TabsContent>
-
-        <TabsContent value="teacher" className="animate-fade-in-up mt-6">
-          <AdminTeacherTab reportData={reportData} />
         </TabsContent>
       </Tabs>
     </DashboardLayout>

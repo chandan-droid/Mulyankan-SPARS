@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { adminNavItems } from './Dashboard';
-import { createAdminSubject, getAdminSubjects } from '@/lib/adminApi';
+import {
+  createAdminSubject,
+  getAdminSubjects,
+  getCachedAdminSubjects,
+} from '@/lib/adminApi';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,8 +22,8 @@ import { Loader2, Plus, BookOpen, Hash } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function SubjectManagement() {
-  const [subjects, setSubjects] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [subjects, setSubjects] = useState(() => getCachedAdminSubjects());
+  const [loading, setLoading] = useState(subjects.length === 0);
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
@@ -27,9 +31,11 @@ export default function SubjectManagement() {
     subjectName: '',
   });
 
-  const refresh = async () => {
+  const refresh = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent || subjects.length === 0) {
+        setLoading(true);
+      }
       const items = await getAdminSubjects();
       setSubjects(items);
     } catch (error) {
@@ -40,7 +46,7 @@ export default function SubjectManagement() {
   };
 
   useEffect(() => {
-    refresh();
+    refresh(true);
   }, []);
 
   const handleSave = async () => {

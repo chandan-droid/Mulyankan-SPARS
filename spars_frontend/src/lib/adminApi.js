@@ -130,12 +130,33 @@ function mapClassToApi(item) {
 }
 
 function mapAdminMarkFromApi(item) {
-  const marksValue = item.totalMarks ?? item.marksObtained ?? 0;
+  const marksValue =
+    item.totalMarks ??
+    item.marksObtained ??
+    item.quizMarks ??
+    item.assignmentMarks ??
+    item.obtainedMarks ??
+    0;
   return {
     id: item.id,
-    studentId: item.studentId,
-    assessmentId: item.assessmentId,
-    subjectId: item.subjectId ?? null,
+    studentId:
+      item.studentId ??
+      item.student_id ??
+      item.studentID ??
+      item.student?.id ??
+      null,
+    assessmentId:
+      item.assessmentId ??
+      item.assessment_id ??
+      item.assessmentID ??
+      item.assessment?.id ??
+      null,
+    subjectId:
+      item.subjectId ??
+      item.subject_id ??
+      item.subjectID ??
+      item.subject?.id ??
+      null,
     assessmentType: item.assessmentType ?? item.type ?? null,
     totalMarks: marksValue,
     marksObtained: marksValue,
@@ -159,10 +180,32 @@ function mapAdminQuestionMarkFromApi(item) {
   };
 }
 
+function mapAdminAssessmentFromApi(item) {
+  return {
+    id: item.id,
+    name: item.name,
+    type: item.type,
+    subjectId: item.subjectId ?? item.subject_id ?? null,
+    classId: item.classId ?? item.class_id ?? null,
+    maxMarks: Number(item.maxMarks ?? item.max_marks ?? 0),
+    examDate: item.examDate ?? item.exam_date ?? null,
+    branch: item.branch ?? null,
+    semester: item.semester ?? null,
+    section: item.section ?? null,
+    academic_year: item.academicYear ?? item.academic_year ?? null,
+  };
+}
+
 export async function getAdminClasses() {
   const data = await request('/api/admin/classes', {
     fallbackMessage: 'Failed to fetch classes',
   });
+  return Array.isArray(data) ? data.map(mapClassFromApi) : [];
+}
+
+export function getCachedAdminClasses() {
+  const fullUrl = buildUrl('/api/admin/classes');
+  const data = cacheGet(fullUrl);
   return Array.isArray(data) ? data.map(mapClassFromApi) : [];
 }
 
@@ -196,6 +239,12 @@ export async function getAdminStudents({ search, classId } = {}) {
     query: { search, classId },
     fallbackMessage: 'Failed to fetch students',
   });
+  return Array.isArray(data) ? data : [];
+}
+
+export function getCachedAdminStudents({ search, classId } = {}) {
+  const fullUrl = buildUrl('/api/admin/students', { search, classId });
+  const data = cacheGet(fullUrl);
   return Array.isArray(data) ? data : [];
 }
 
@@ -252,6 +301,12 @@ export async function getAdminSubjects() {
   return Array.isArray(data) ? data : [];
 }
 
+export function getCachedAdminSubjects() {
+  const fullUrl = buildUrl('/api/admin/subjects');
+  const data = cacheGet(fullUrl);
+  return Array.isArray(data) ? data : [];
+}
+
 export async function createAdminSubject(subject) {
   return request('/api/admin/subjects', {
     method: 'POST',
@@ -272,6 +327,12 @@ export async function getAdminTeachers() {
   } catch {
     return [];
   }
+}
+
+export function getCachedAdminTeachers() {
+  const fullUrl = buildUrl('/api/admin/teachers');
+  const data = cacheGet(fullUrl);
+  return Array.isArray(data) ? data : [];
 }
 
 export async function createAdminTeacher(teacher) {
@@ -326,6 +387,12 @@ export async function getAdminTeacherAssignments() {
   return Array.isArray(data) ? data : [];
 }
 
+export function getCachedAdminTeacherAssignments() {
+  const fullUrl = buildUrl('/api/admin/teacher-assignments');
+  const data = cacheGet(fullUrl);
+  return Array.isArray(data) ? data : [];
+}
+
 export async function deleteAdminTeacherAssignment(id) {
   await request(`/api/admin/teacher-assignments/${id}`, {
     method: 'DELETE',
@@ -337,7 +404,13 @@ export async function getAdminAssessments() {
   const data = await request('/api/admin/assessments', {
     fallbackMessage: 'Failed to fetch assessments',
   });
-  return Array.isArray(data) ? data : [];
+  return Array.isArray(data) ? data.map(mapAdminAssessmentFromApi) : [];
+}
+
+export function getCachedAdminAssessments() {
+  const fullUrl = buildUrl('/api/admin/assessments');
+  const data = cacheGet(fullUrl);
+  return Array.isArray(data) ? data.map(mapAdminAssessmentFromApi) : [];
 }
 
 export async function updateAdminAssessment(id, assessment) {
@@ -357,6 +430,32 @@ export async function updateAdminAssessment(id, assessment) {
 }
 
 export async function getAdminMarks({ assessmentId, classId, studentId } = {}) {
+  if (!assessmentId && !classId && !studentId) {
+    // Backend requires at least one filter. Aggregate by assessment for reports.
+    const assessments = await getAdminAssessments();
+    if (!Array.isArray(assessments) || assessments.length === 0) return [];
+
+    const settled = await Promise.allSettled(
+      assessments.map((assessment) =>
+        request('/api/admin/marks', {
+          query: { assessmentId: assessment.id },
+          fallbackMessage: `Failed to fetch marks for assessment ${assessment.id}`,
+        })
+      )
+    );
+
+    const merged = settled
+      .filter((result) => result.status === 'fulfilled' && Array.isArray(result.value))
+      .flatMap((result) => result.value)
+      .map(mapAdminMarkFromApi);
+
+    const deduped = new Map();
+    merged.forEach((item) => {
+      if (item?.id != null) deduped.set(String(item.id), item);
+    });
+    return Array.from(deduped.values());
+  }
+
   const data = await request('/api/admin/marks', {
     query: { assessmentId, classId, studentId },
     fallbackMessage: 'Failed to fetch marks',
@@ -364,11 +463,41 @@ export async function getAdminMarks({ assessmentId, classId, studentId } = {}) {
   return Array.isArray(data) ? data.map(mapAdminMarkFromApi) : [];
 }
 
+export function getCachedAdminMarks({ assessmentId, classId, studentId } = {}) {
+  if (!assessmentId && !classId && !studentId) {
+    const assessments = getCachedAdminAssessments();
+    if (!Array.isArray(assessments) || assessments.length === 0) return [];
+
+    const merged = assessments.flatMap((assessment) => {
+      const fullUrl = buildUrl('/api/admin/marks', { assessmentId: assessment.id });
+      const data = cacheGet(fullUrl);
+      return Array.isArray(data) ? data.map(mapAdminMarkFromApi) : [];
+    });
+
+    const deduped = new Map();
+    merged.forEach((item) => {
+      if (item?.id != null) deduped.set(String(item.id), item);
+    });
+    return Array.from(deduped.values());
+  }
+
+  const fullUrl = buildUrl('/api/admin/marks', { assessmentId, classId, studentId });
+  const data = cacheGet(fullUrl);
+  return Array.isArray(data) ? data.map(mapAdminMarkFromApi) : [];
+}
+
 export async function getAdminQuestionMarks({ markId } = {}) {
-  const data = await request('/api/admin/question-marks', {
-    query: { markId },
-    fallbackMessage: 'Failed to fetch question marks',
+  if (!markId) return [];
+  const data = await request(`/api/admin/question-marks/by-mark/${markId}`, {
+    fallbackMessage: `Failed to fetch question marks for mark ${markId}`,
   });
+  return Array.isArray(data) ? data.map(mapAdminQuestionMarkFromApi) : [];
+}
+
+export function getCachedAdminQuestionMarks({ markId } = {}) {
+  if (!markId) return [];
+  const fullUrl = buildUrl(`/api/admin/question-marks/by-mark/${markId}`);
+  const data = cacheGet(fullUrl);
   return Array.isArray(data) ? data.map(mapAdminQuestionMarkFromApi) : [];
 }
 
@@ -388,4 +517,22 @@ export async function getAdminStudentCoAttainment(studentId, subjectId) {
   return request(`/api/admin/co-attainment/student/${studentId}/subject/${subjectId}`, {
     fallbackMessage: 'Failed to fetch student CO attainment',
   });
+}
+
+/** GET /api/admin/analytics/institute/grade-distribution
+ *  Returns [{grade, studentCount}] */
+export async function getAdminInstituteGradeDistribution() {
+  const data = await request('/api/admin/analytics/institute/grade-distribution', {
+    fallbackMessage: 'Failed to fetch institute grade distribution',
+  });
+  return Array.isArray(data) ? data : [];
+}
+
+/** GET /api/admin/analytics/assessment-types/average-percentage
+ *  Returns [{assessmentType, averagePercentage}] */
+export async function getAdminAssessmentTypeAverages() {
+  const data = await request('/api/admin/analytics/assessment-types/average-percentage', {
+    fallbackMessage: 'Failed to fetch assessment type averages',
+  });
+  return Array.isArray(data) ? data : [];
 }

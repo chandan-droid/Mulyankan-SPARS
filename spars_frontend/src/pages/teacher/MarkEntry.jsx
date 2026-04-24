@@ -15,17 +15,19 @@ import {
   getMidsemTemplate,
   buildDefaultMidsemQuestions,
   saveMidsemTemplate,
-  updateAssessmentTotalClasses,
 } from '@/data/store';
 import {
   getMyAssignments,
   getMyAssessments,
+  getCachedMyAssignments,
+  getCachedMyAssessments,
   createMarksBulk,
   updateMarksBulk,
   getMarksByAssessment as fetchMarksByAssessmentApi,
   getQuestionMarksByAssessmentAndClass as fetchQuestionMarksByAssessmentAndClassApi,
   saveQuestionMarksByAssessmentAndClass as saveQuestionMarksBulkApi,
   getStudentsByClass as fetchStudentsByClassApi,
+  getClassById,
 } from '@/lib/teacherApi';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -54,10 +56,16 @@ export default function MarkEntry() {
   const localAssignments = getAssignmentsForTeacher(user?.id || '');
   const subjects = getSubjects();
   const localAssessments = getAssessments();
+  const cachedAssignments = getCachedMyAssignments();
+  const cachedAssessments = getCachedMyAssessments();
 
-  const [apiAssignments, setApiAssignments] = useState([]);
-  const [apiAssessments, setApiAssessments] = useState([]);
-  const [hasApiData, setHasApiData] = useState(false);
+  const [apiAssignments, setApiAssignments] = useState(cachedAssignments);
+  const [apiAssessments, setApiAssessments] = useState(cachedAssessments);
+  const [hasApiData, setHasApiData] = useState(
+    cachedAssignments.length > 0 || cachedAssessments.length > 0
+  );
+  // classId -> AcademicClassDTO (branch, semester, section, studentCount, academicYear)
+  const [classDetailsMap, setClassDetailsMap] = useState({});
 
   const [selectedId, setSelectedId] = useState('');
   const [midsemRows, setMidsemRows] = useState([]);
@@ -66,11 +74,16 @@ export default function MarkEntry() {
   const [originalSimpleRows, setOriginalSimpleRows] = useState([]);
   const [isSaving, setIsSaving] = useState(false);
   const [apiError, setApiError] = useState(null);
-  const [isInitializing, setIsInitializing] = useState(true);
+  const hasWarmStartData =
+    cachedAssignments.length > 0 ||
+    cachedAssessments.length > 0 ||
+    localAssignments.length > 0 ||
+    localAssessments.length > 0;
+  const [isInitializing, setIsInitializing] = useState(!hasWarmStartData);
 
   useEffect(() => {
     let cancelled = false;
-    setIsInitializing(true);
+    if (!hasWarmStartData) setIsInitializing(true);
 
     const loadTeacherData = async () => {
       try {
@@ -97,7 +110,7 @@ export default function MarkEntry() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [hasWarmStartData]);
 
   const assignments = hasApiData ? apiAssignments : localAssignments;
   const allAssessments = hasApiData ? apiAssessments : localAssessments;
@@ -150,6 +163,26 @@ export default function MarkEntry() {
         };
       });
   }, [allAssessments, assignments]);
+
+  // Fetch class details for each unique classId in myAssessments
+  useEffect(() => {
+    if (!hasApiData || myAssessments.length === 0) return;
+    const uniqueClassIds = [...new Set(myAssessments.map(a => a.classId).filter(Boolean))];
+    if (uniqueClassIds.length === 0) return;
+    let cancelled = false;
+    Promise.allSettled(uniqueClassIds.map(id => getClassById(id)))
+      .then(results => {
+        if (cancelled) return;
+        const map = {};
+        results.forEach((r, i) => {
+          if (r.status === 'fulfilled' && r.value) {
+            map[String(uniqueClassIds[i])] = r.value;
+          }
+        });
+        setClassDetailsMap(map);
+      });
+    return () => { cancelled = true; };
+  }, [hasApiData, myAssessments]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const assessment = myAssessments.find((a) => a.id === selectedId);
 
@@ -367,29 +400,17 @@ export default function MarkEntry() {
           studentName: s.name,
           regNo: s.regNo || '',
           marks: resolvedMarks,
-          attendedClasses: mark?.attendedClasses ?? 0,
           quizMarks: mark?.quizMarks ?? resolvedMarks,
         };
 
-        // FIX #3: ATTENDANCE-SPECIFIC HANDLING
+        // ATTENDANCE now uses direct marks out of 5.
         if (a.type === 'ATTENDANCE') {
-          const total = a.totalClasses || 40;
-          const attended = mark?.attendedClasses;
-          if (attended !== undefined && attended !== null) {
-            row.attendedClasses = attended;
-            // Recalculate marks when attendance count exists.
-            row.marks = (attended / total) >= 0.75 ? 5 : 0;
-          } else {
-            // Preserve fetched marks when only final score is available from API.
-            row.attendedClasses = 0;
-            row.marks = resolvedMarks;
-          }
+          row.marks = Math.min(Math.max(0, Number(resolvedMarks) || 0), 5);
         }
 
         console.log(`✓ Processed student ${studentIdStr} (${s.name}):`, {
           found: !!mark,
           marksValue: row.marks,
-          attendedValue: row.attendedClasses,
           assessmentType: a.type
         });
 
@@ -438,12 +459,6 @@ export default function MarkEntry() {
       if (field === 'quizMarks') {
         row.quizMarks = value;
         row.marks = value; // Keep marks in sync with quizMarks
-      }
-      if (field === 'attendedClasses') {
-        const total = assessment?.totalClasses || 40;
-        row.attendedClasses = Math.min(Math.max(0, value), total);
-        // FIX: Auto-calculate marks: >= 75% attendance = 5, else = 0
-        row.marks = (row.attendedClasses / total) >= 0.75 ? 5 : 0;
       }
       rows[idx] = row;
       return rows;
@@ -511,10 +526,7 @@ export default function MarkEntry() {
       );
       if (!originalRow) return true; // New student
       const marksChanged = Number(row.marks) !== Number(originalRow.marks);
-      const attendedChanged =
-        assessment?.type === 'ATTENDANCE' &&
-        Number(row.attendedClasses ?? 0) !== Number(originalRow.attendedClasses ?? 0);
-      return marksChanged || attendedChanged;
+      return marksChanged;
     });
   }, [simpleRows, originalSimpleRows, assessment]);
 
@@ -627,9 +639,6 @@ export default function MarkEntry() {
             .map((row) => ({
               studentId: row.studentId,
               totalMarks: Number(row.marks),
-              ...(assessment.type === 'ATTENDANCE'
-                ? { attendedClasses: Number(row.attendedClasses ?? 0) }
-                : {}),
               ...(assessment.type === 'QUIZ'
                 ? { quizMarks: Number(row.marks ?? 0) }
                 : {}),
@@ -659,7 +668,6 @@ export default function MarkEntry() {
               subjectId: assessment.subjectId,
               assessmentType: assessment.type,
               totalMarks: row.marks,
-              attendedClasses: row.attendedClasses,
               quizMarks: row.quizMarks,
             });
           }
@@ -724,26 +732,31 @@ export default function MarkEntry() {
               }
               row.marks = row.quizMarks;
             } else if (assessment.type === 'ASSIGNMENT') {
-              let mKey;
-              if (String(assessment.name).includes('1')) {
-                mKey = findKey(studentData, 'assign1') || findKey(studentData, 'assignment1');
-              } else {
-                mKey = findKey(studentData, 'assign2') || findKey(studentData, 'assignment2');
-              }
-              mKey = mKey || findKey(studentData, 'marks') || findKey(studentData, 'score');
+              const mKey =
+                findKey(studentData, 'assign') ||
+                findKey(studentData, 'assignment') ||
+                findKey(studentData, 'assign1') ||
+                findKey(studentData, 'assignment1') ||
+                findKey(studentData, 'marks') ||
+                findKey(studentData, 'score');
 
               if (mKey !== undefined && studentData[mKey] !== undefined) {
                 const val = parseFloat(studentData[mKey]);
-                if (!isNaN(val)) row.marks = Math.min(Math.max(0, val), 5);
+                if (!isNaN(val)) row.marks = Math.min(Math.max(0, val), assessment.maxMarks ?? 10);
               }
             } else if (assessment.type === 'ATTENDANCE') {
-              const attKey = findKey(studentData, 'attended') || findKey(studentData, 'attendedclasses');
+              const attKey =
+                findKey(studentData, 'attendance') ||
+                findKey(studentData, 'attendancemarks') ||
+                findKey(studentData, 'attend') ||
+                findKey(studentData, 'marks') ||
+                findKey(studentData, 'score') ||
+                findKey(studentData, 'attended') ||
+                findKey(studentData, 'attendedclasses');
               if (attKey !== undefined && studentData[attKey] !== undefined) {
                 const v = parseFloat(studentData[attKey]);
                 if (!isNaN(v)) {
-                  const total = assessment.totalClasses || 40;
-                  row.attendedClasses = Math.min(Math.max(0, v), total);
-                  row.marks = (row.attendedClasses / total) >= 0.75 ? 5 : 0;
+                  row.marks = Math.min(Math.max(0, v), 5);
                 }
               }
             }
@@ -784,14 +797,14 @@ export default function MarkEntry() {
     if (!assessment) return;
 
     let wsData = [];
-    const headers = ['S.No.', 'Redg. No.', 'Student Name', '1a', '1b', '1c', '1d', '1e', '2a', '2b', '2c', '2d', '2e', '2f', 'Assign 1', 'Assign 2', 'Attended Classes', 'Quiz 1', 'Quiz 2', 'Quiz 3'];
+    const headers = ['S.No.', 'Redg. No.', 'Student Name', '1a', '1b', '1c', '1d', '1e', '2a', '2b', '2c', '2d', '2e', '2f', 'Assignment', 'Attendance Marks', 'Quiz'];
     wsData.push(headers);
 
     const rowsBasis = assessment.type === 'MIDSEM' ? midsemRows : simpleRows;
     rowsBasis.forEach((r, i) => {
       const rowData = [i + 1, r.regNo, r.studentName];
-      // Push 17 empty strings because headers have exactly 3 initial cols + 17 specific targets = 20 total
-      for (let x = 0; x < 17; x++) rowData.push('');
+      // Keep template rows aligned with all assessment columns after identity fields.
+      for (let x = 0; x < 14; x++) rowData.push('');
       wsData.push(rowData);
     });
 
@@ -838,16 +851,24 @@ export default function MarkEntry() {
   };
 
   // Group assessments by course for the master list
+  // Enrich with API class details (branch/sem/section from classDetailsMap)
   const groupedMenu = Object.values(
     myAssessments.reduce((acc, a) => {
-      const key = `${a.subjectId}-${a.branch}-${a.semester}-${a.section}`;
+      const classKey = String(a.classId ?? '');
+      const cd = classDetailsMap[classKey];
+      const branch   = cd?.branch   ?? a.branch   ?? '';
+      const semester = cd?.semester ?? a.semester ?? '';
+      const section  = cd?.section  ?? a.section  ?? '';
+      const key = `${a.subjectId}-${a.classId ?? `${branch}-${semester}-${section}`}`;
       if (!acc[key]) {
         acc[key] = {
           id: key,
           subjectId: a.subjectId,
-          branch: a.branch,
-          semester: a.semester,
-          section: a.section,
+          branch,
+          semester,
+          section,
+          studentCount: cd?.studentCount ?? null,
+          academicYear: cd?.academicYear ?? null,
           assessments: [],
         };
       }
@@ -992,12 +1013,35 @@ export default function MarkEntry() {
                         {assessment.type}
                       </Badge>
                       <span className="text-xs font-bold text-muted-foreground">MAX {assessment.maxMarks}</span>
+                      {(() => {
+                        const cd = classDetailsMap[String(assessment.classId ?? '')];
+                        const count = cd?.studentCount;
+                        return count != null ? (
+                          <span className="text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 px-2 py-0.5 rounded-full">
+                            {count} students
+                          </span>
+                        ) : null;
+                      })()}
                     </div>
                     <CardTitle className="text-xl font-heading font-extrabold text-foreground">
                       {assessment.name || assessment.type} — {getSubjectName(assessment.subjectId)}
                     </CardTitle>
                     <p className="text-xs font-semibold text-muted-foreground tracking-wide mt-1">
-                      {assessment.branch} <span className="opacity-40 px-1">•</span> S{assessment.semester} <span className="opacity-40 px-1">•</span> SEC {assessment.section}
+                      {(() => {
+                        const cd = classDetailsMap[String(assessment.classId ?? '')];
+                        const branch   = cd?.branch   ?? assessment.branch   ?? '—';
+                        const semester = cd?.semester ?? assessment.semester ?? '—';
+                        const section  = cd?.section  ?? assessment.section  ?? '—';
+                        const ayear    = cd?.academicYear ?? '';
+                        return (
+                          <>
+                            {branch} <span className="opacity-40 px-1">•</span>
+                            Sem {semester} <span className="opacity-40 px-1">•</span>
+                            Sec {section}
+                            {ayear ? <> <span className="opacity-40 px-1">•</span> {ayear}</> : null}
+                          </>
+                        );
+                      })()}
                     </p>
                   </div>
 
@@ -1035,32 +1079,32 @@ export default function MarkEntry() {
                 </div>
               </CardHeader>
 
-              <CardContent className="p-0 overflow-x-auto bg-background/50">
+              <CardContent className="p-0 bg-background/50 [&_div.overflow-auto]:h-[calc(100vh-280px)] [&_div.overflow-auto]:overflow-auto">
                 {/* ── MIDSEM ─────────────────────────────────── */}
                 {assessment.type === 'MIDSEM' && midsemTemplate && (
                   <>
                     <Table>
-                      <TableHeader>
-                        <TableRow className="bg-muted/40 hover:bg-muted/40 border-b border-border/40">
-                          <TableHead className="sticky left-0 bg-muted/40 z-10 font-bold text-xs uppercase tracking-widest text-muted-foreground/70 min-w-[200px]">
+                      <TableHeader className="sticky top-0 z-30 bg-card outline outline-1 outline-border">
+                        <TableRow className="border-b border-border/40">
+                          <TableHead className="sticky left-0 bg-card z-40 font-bold text-xs uppercase tracking-widest text-muted-foreground/70 min-w-[200px] border-r border-border/20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
                             Student Match
                           </TableHead>
-                          <TableHead colSpan={5} className="text-center font-extrabold text-xs uppercase tracking-widest text-blue-700 bg-blue-500/5 border-x border-blue-500/10">
+                          <TableHead colSpan={5} className="text-center font-extrabold text-xs uppercase tracking-widest text-blue-700 bg-blue-500/10 border-x border-blue-500/10">
                             Part A
                           </TableHead>
-                          <TableHead colSpan={6} className="text-center font-extrabold text-xs uppercase tracking-widest text-purple-700 bg-purple-500/5 border-x border-purple-500/10">
+                          <TableHead colSpan={6} className="text-center font-extrabold text-xs uppercase tracking-widest text-purple-700 bg-purple-500/10 border-x border-purple-500/10">
                             Part B
                           </TableHead>
-                          <TableHead className="text-center font-bold text-xs uppercase tracking-widest text-muted-foreground/70">
+                          <TableHead className="text-center bg-card font-bold text-xs uppercase tracking-widest text-muted-foreground/70">
                             Net
                           </TableHead>
                         </TableRow>
-                        <TableRow className="bg-muted/10 hover:bg-muted/10 border-b border-border/30">
-                          <TableHead className="sticky left-0 bg-muted/10 z-10 p-2" />
+                        <TableRow className="border-b border-border/30">
+                          <TableHead className="sticky left-0 bg-card z-40 p-2 border-r border-border/20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]" />
                           {midsemTemplate.questions.map((q, qi) => (
                             <TableHead
                               key={`${q.questionNumber}-${qi}`}
-                              className={`text-center min-w-[70px] text-[10px] p-2 leading-none border-x border-border/10 ${q.part === 'A' ? 'bg-blue-500/5' : 'bg-purple-500/5'}`}
+                              className={`text-center min-w-[70px] text-[10px] p-2 leading-none border-x border-border/10 ${q.part === 'A' ? 'bg-blue-500/10' : 'bg-purple-500/10'}`}
                             >
                               <div className="font-extrabold text-foreground mb-0.5">Q {getMidsemQuestionLabel(q, qi)}</div>
                               <span className="text-[8px] font-bold text-muted-foreground uppercase">{q.maxMarks}m MAX</span>
@@ -1080,7 +1124,7 @@ export default function MarkEntry() {
                               </div>
                             </TableHead>
                           ))}
-                          <TableHead />
+                          <TableHead className="bg-card" />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1125,9 +1169,9 @@ export default function MarkEntry() {
                 {/* ── SIMPLE EVALS (QUIZ / ASSIGNMENT / ATTENDANCE) ── */}
                 {assessment.type !== 'MIDSEM' && (
                   <Table>
-                    <TableHeader>
-                      <TableRow className="bg-muted/40 hover:bg-muted/40 border-b border-border/40">
-                        <TableHead className="font-bold text-xs uppercase tracking-widest text-muted-foreground/70 min-w-[200px] pl-6">
+                    <TableHeader className="sticky top-0 z-30 bg-card outline outline-1 outline-border">
+                      <TableRow className="border-b border-border/40">
+                        <TableHead className="sticky left-0 bg-card z-40 font-bold text-xs uppercase tracking-widest text-muted-foreground/70 min-w-[200px] pl-6 border-r border-border/20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
                           Student Match
                         </TableHead>
                         {assessment.type === 'QUIZ' && (
@@ -1137,27 +1181,11 @@ export default function MarkEntry() {
                           </TableHead>
                         )}
                         {assessment.type === 'ASSIGNMENT' && (
-                          <TableHead className="text-center font-bold text-xs uppercase tracking-widest text-muted-foreground/70">Assignment Marks (MAX 5)</TableHead>
+                          <TableHead className="text-center font-bold text-xs uppercase tracking-widest text-muted-foreground/70">Assignment Marks (MAX {assessment.maxMarks ?? 10})</TableHead>
                         )}
                         {assessment.type === 'ATTENDANCE' && (
                           <TableHead className="text-center font-bold text-xs uppercase tracking-widest text-muted-foreground/70">
-                            Attended Classes
-                            <div className="mt-1 flex items-center justify-center gap-1.5 text-[10px]">
-                              <span>TOTAL:</span>
-                              <Input
-                                type="number" min={1}
-                                className="h-6 w-14 text-center px-1 text-[10px] font-bold border-border/40 bg-background/50"
-                                value={assessment?.totalClasses || 40}
-                                onChange={(e) => {
-                                  const val = Number(e.target.value) || 1;
-                                  updateAssessmentTotalClasses(assessment.id, val);
-                                  assessment.totalClasses = val;
-                                  setSimpleRows(prev => prev.map(r => ({
-                                    ...r, marks: (r.attendedClasses / val) >= 0.75 ? 5 : 0
-                                  })));
-                                }}
-                              />
-                            </div>
+                            Attendance Marks (MAX 5)
                           </TableHead>
                         )}
                         <TableHead className="text-center font-extrabold text-xs uppercase tracking-widest text-primary bg-primary/5">Final Out Of {assessment.maxMarks}</TableHead>
@@ -1166,7 +1194,7 @@ export default function MarkEntry() {
                     <TableBody>
                       {simpleRows.map((row, i) => (
                         <TableRow key={row.studentId} className="hover:bg-primary/[0.03] transition-colors border-b border-border/20">
-                          <TableCell className="pl-6">
+                          <TableCell className="sticky left-0 bg-card z-10 border-r border-border/20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] pl-6">
                             <div className="flex flex-col">
                               <span className="font-bold text-sm text-foreground">{row.studentName}</span>
                               <span className="text-[10px] font-mono text-muted-foreground bg-muted/50 w-fit px-1 rounded mt-0.5 tracking-wider">{row.regNo}</span>
@@ -1191,7 +1219,7 @@ export default function MarkEntry() {
                           {assessment.type === 'ASSIGNMENT' && (
                             <TableCell className="text-center">
                               <Input
-                                type="number" min={0} max={5}
+                                type="number" min={0} max={assessment.maxMarks ?? 10}
                                 data-mark-grid="ASSIGNMENT"
                                 data-mark-row={i}
                                 data-mark-col={0}
@@ -1206,13 +1234,13 @@ export default function MarkEntry() {
                           {assessment.type === 'ATTENDANCE' && (
                             <TableCell className="text-center">
                               <Input
-                                type="number" min={0} max={assessment?.totalClasses || 40}
+                                type="number" min={0} max={5}
                                 data-mark-grid="ATTENDANCE"
                                 data-mark-row={i}
                                 data-mark-col={0}
-                                value={row.attendedClasses === 0 ? '' : row.attendedClasses} placeholder="0"
+                                value={row.marks === 0 ? '' : row.marks} placeholder="0"
                                 onKeyDown={(e) => handleMarkCellKeyDown(e, 'ATTENDANCE', i, 0, 0)}
-                                onChange={(e) => updateSimpleRow(i, 'attendedClasses', e.target.value === '' ? 0 : Number(e.target.value))}
+                                onChange={(e) => updateSimpleRow(i, 'marks', e.target.value === '' ? 0 : Number(e.target.value))}
                                 className="h-10 w-32 px-2 mx-auto text-center rounded-xl text-base tabular-nums font-bold bg-background"
                               />
                             </TableCell>

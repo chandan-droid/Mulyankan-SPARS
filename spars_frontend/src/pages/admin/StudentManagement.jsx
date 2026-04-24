@@ -6,6 +6,8 @@ import {
   createAdminStudent,
   createAdminStudentsBulk,
   deleteAdminStudent,
+  getCachedAdminClasses,
+  getCachedAdminStudents,
   getAdminClasses,
   getAdminStudents,
   updateAdminStudent,
@@ -77,9 +79,13 @@ const branchColor = (b) => {
 };
 
 export default function StudentManagement() {
-  const [students, setStudents] = useState([]);
-  const [classes, setClasses] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedClasses = useMemo(() => getCachedAdminClasses(), []);
+  const cachedStudents = useMemo(() => getCachedAdminStudents(), []);
+  const [students, setStudents] = useState(cachedStudents);
+  const [classes, setClasses] = useState(cachedClasses);
+  const [loading, setLoading] = useState(
+    !(cachedClasses.length > 0 || cachedStudents.length > 0)
+  );
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
 
@@ -106,9 +112,11 @@ export default function StudentManagement() {
     return map;
   }, [classes]);
 
-  const refresh = async () => {
+  const refresh = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent || !(classes.length > 0 || students.length > 0)) {
+        setLoading(true);
+      }
       const [classItems, studentItems] = await Promise.all([
         getAdminClasses(),
         getAdminStudents(),
@@ -126,7 +134,7 @@ export default function StudentManagement() {
   };
 
   useEffect(() => {
-    refresh();
+    refresh(true);
   }, []);
 
   const filteredAndSorted = students

@@ -25,7 +25,7 @@ export default function TeacherCOTab({ reportData, selectedSubject, relevantStud
          if (cancel) return;
          const formatted = (res?.coAttainments || []).map(co => ({
             co: `CO${co.coNumber}`,
-            avg: co.attainmentLevel,
+            avg: Math.round(Number(co.attainmentLevel) * 10) / 10,
          }));
          setCoData(formatted);
       })
@@ -76,26 +76,7 @@ export default function TeacherCOTab({ reportData, selectedSubject, relevantStud
             ))}
           </div>
 
-          <Card className="glass-card">
-            <CardHeader><CardTitle className="text-sm font-heading font-semibold">CO-wise Attainment Chart</CardTitle></CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={coData} barGap={4}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(225,14%,90%)" vertical={false} />
-                  <XAxis dataKey="co" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
-                  <YAxis domain={[0, 100]} tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
-                  <RTC contentStyle={{ borderRadius: '12px' }} />
-                  <Legend />
-                  <ReferenceLine y={threshold} label={{ position: 'top', value: `Target ${threshold}%`, fill: 'hsl(0,72%,55%)', fontSize: 11 }} stroke="hsl(0,72%,55%)" strokeDasharray="3 3" />
-                  <Bar dataKey="avg" name="Attainment %" radius={[6, 6, 0, 0]}>
-                    {coData.map((entry, index) => (
-                       <Cell key={`cell-${index}`} fill={entry.avg >= threshold ? 'hsl(168,60%,48%)' : 'hsl(0,72%,55%)'} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
+
         </>
       ) : (
         <div className="text-center py-16">

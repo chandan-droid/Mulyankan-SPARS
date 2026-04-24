@@ -94,7 +94,7 @@ async function request(path, { method = 'GET', body, query, fallback, fresh = fa
         const refresh = fetch(fullUrl, { method: 'GET', headers: getAuthHeaders() })
           .then((res) => parseResponse(res, fallback || `GET ${path} failed`))
           .then((freshData) => cacheSet(fullUrl, freshData))
-          .catch(() => {}) // silently swallow – cached data is still valid
+          .catch(() => { }) // silently swallow – cached data is still valid
           .finally(() => _bgRefreshes.delete(fullUrl));
         _bgRefreshes.set(fullUrl, refresh);
       }
@@ -275,6 +275,17 @@ export async function getMyAssignments() {
 }
 
 /**
+ * Read cached teacher assignments synchronously from localStorage cache.
+ * Useful for instant page bootstrap before network refresh.
+ * @returns {Array}
+ */
+export function getCachedMyAssignments() {
+  const fullUrl = buildUrl('/api/teacher/classrooms/my-assignments');
+  const data = cacheGet(fullUrl);
+  return Array.isArray(data) ? data.map(normalizeAssignment) : [];
+}
+
+/**
  * Fetch a single class by its ID for teacher-side class context.
  * @param {number} classId
  * @returns {Promise<object>} Normalized academic class.
@@ -303,6 +314,17 @@ export async function getMyAssessments({ classId, subjectId } = {}) {
     query: { classId, subjectId },
     fallback: 'Failed to fetch assessments',
   });
+  return Array.isArray(data) ? data.map(normalizeAssessment) : [];
+}
+
+/**
+ * Read cached teacher assessments synchronously from localStorage cache.
+ * @param {{ classId?: number, subjectId?: number }} [filters]
+ * @returns {Array}
+ */
+export function getCachedMyAssessments({ classId, subjectId } = {}) {
+  const fullUrl = buildUrl('/api/teacher/grades', { classId, subjectId });
+  const data = cacheGet(fullUrl);
   return Array.isArray(data) ? data.map(normalizeAssessment) : [];
 }
 
@@ -523,7 +545,7 @@ export async function createQuestionMark(markId, qmData) {
  */
 export async function updateQuestionMark(questionMarkId, qmData) {
   const payload = {};
-  
+
   if (qmData.marksObtained !== undefined && qmData.marksObtained !== null && !Number.isNaN(Number(qmData.marksObtained))) {
     payload.marksObtained = Number(qmData.marksObtained);
   } else if (qmData.obtainedMarks !== undefined && qmData.obtainedMarks !== null && !Number.isNaN(Number(qmData.obtainedMarks))) {
@@ -535,11 +557,11 @@ export async function updateQuestionMark(questionMarkId, qmData) {
     if (coVal === '') coVal = '1';
     payload.coNumber = Number(coVal);
   }
-  
+
   if (qmData.maxMarks !== undefined) {
     payload.maxMarks = Number(qmData.maxMarks);
   }
-  
+
   if (qmData.questionNumber !== undefined) {
     let qVal = String(qmData.questionNumber).replace(/[^0-9]/g, '');
     if (qVal) {
@@ -595,7 +617,7 @@ export async function getQuestionMarksByAssessmentAndClass(assessmentId, classId
     fresh: true,
     fallback: `Failed to fetch question marks for assessment ${assessmentId} and class ${classId}`,
   });
-  
+
   if (Array.isArray(data)) {
     return data.map(normalizeQuestionMark);
   }
@@ -618,7 +640,7 @@ export async function saveQuestionMarksByAssessmentAndClass(assessmentId, classI
     body: { studentMarks },
     fallback: `Failed to bulk save question marks for assessment ${assessmentId} and class ${classId}`,
   });
-  
+
   if (Array.isArray(data)) {
     return data.map(normalizeQuestionMark);
   }
@@ -731,4 +753,164 @@ export async function getClassCoAttainment(classId, subjectId) {
     fallback: `Failed to fetch CO attainment for class ${classId}`,
   });
   return data;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  7. ANALYTICS  (TeacherAnalyticsController)
+ *  GET /api/teacher/analytics/…
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Marks entry progress summary for the authenticated teacher.
+ * GET /api/teacher/analytics/marks-entry-progress
+ * @returns {Promise<{averageProgressPercentage: number, progressByAssessmentType: Array<{assessmentType, recordedAssessments, totalAssessments, progressPercentage}>}>}
+ */
+export async function getMarksEntryProgress() {
+  const data = await request('/api/teacher/analytics/marks-entry-progress', {
+    fallback: 'Failed to fetch marks entry progress',
+  });
+  return data ?? {};
+}
+
+/**
+ * Assignment count grouped by branch for the authenticated teacher.
+ * GET /api/teacher/analytics/assignments-by-branch
+ * @returns {Promise<Array<{branch: string, assignmentCount: number}>>}
+ */
+export async function getAssignmentsByBranch() {
+  const data = await request('/api/teacher/analytics/assignments-by-branch', {
+    fallback: 'Failed to fetch assignments by branch',
+  });
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Performance distribution for an assessment (bucketed score ranges).
+ * @param {number} assessmentId
+ * @returns {Promise<Array<{range:string, studentCount:number}>>}
+ */
+export async function getPerformanceDistribution(assessmentId) {
+  const data = await request(
+    `/api/teacher/analytics/assessment/${assessmentId}/performance-distribution`,
+    { fallback: `Failed to fetch performance distribution for assessment ${assessmentId}` }
+  );
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Top-N performers for a subject.
+ * @param {number} subjectId
+ * @param {number} [count=5]
+ * @returns {Promise<Array<{studentId,studentName,overallPercentage}>>}
+ */
+export async function getTopPerformers(subjectId, count = 5) {
+  const data = await request(
+    `/api/teacher/analytics/subject/${subjectId}/top-performers`,
+    { query: { count }, fallback: `Failed to fetch top performers for subject ${subjectId}` }
+  );
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Bottom-N performers for a subject.
+ * @param {number} subjectId
+ * @param {number} [count=5]
+ * @returns {Promise<Array<{studentId,studentName,overallPercentage}>>}
+ */
+export async function getBottomPerformers(subjectId, count = 5) {
+  const data = await request(
+    `/api/teacher/analytics/subject/${subjectId}/bottom-performers`,
+    { query: { count }, fallback: `Failed to fetch bottom performers for subject ${subjectId}` }
+  );
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * CO attainment comparison across all assessments for a subject.
+ * @param {number} subjectId
+ * @returns {Promise<Array<{assessmentId,assessmentName,coAttainments:[{coNumber,attainmentLevel}]}>>}
+ */
+export async function getCoAttainmentComparison(subjectId) {
+  const data = await request(
+    `/api/teacher/analytics/subject/${subjectId}/co-attainment-comparison`,
+    { fallback: `Failed to fetch CO attainment comparison for subject ${subjectId}` }
+  );
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Overall class performance overview.
+ * @param {number} classId
+ * @param {number|null} [subjectId]
+ * @returns {Promise<object>}
+ */
+export async function getClassOverview(classId, subjectId = null) {
+  const data = await request(
+    `/api/teacher/analytics/class/${classId}/overview`,
+    { query: { subjectId }, fallback: `Failed to fetch class overview for class ${classId}` }
+  );
+  return data ?? {};
+}
+
+/**
+ * Top-N students in a class (optionally filtered by subject).
+ * @param {number} classId
+ * @param {number|null} [subjectId]
+ * @param {number} [count=5]
+ * @returns {Promise<Array<{studentId,studentName,overallPercentage,band}>>}
+ */
+export async function getTeacherTopStudents(classId, subjectId = null, count = 5) {
+  const data = await request(
+    `/api/teacher/analytics/class/${classId}/top-students`,
+    { query: { subjectId, count }, fallback: `Failed to fetch top students for class ${classId}` }
+  );
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * At-risk / weak students in a class below a threshold.
+ * @param {number} classId
+ * @param {number|null} [subjectId]
+ * @param {number} [threshold=40]
+ * @returns {Promise<Array<{studentId,studentName,overallPercentage,band}>>}
+ */
+export async function getTeacherWeakStudents(classId, subjectId = null, threshold = 40) {
+  const data = await request(
+    `/api/teacher/analytics/class/${classId}/weak-students`,
+    { query: { subjectId, threshold }, fallback: `Failed to fetch weak students for class ${classId}` }
+  );
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Performance trends for a class over time.
+ * @param {number} classId
+ * @param {number|null} [subjectId]
+ * @returns {Promise<Array<{label:string, value:number}>>}
+ */
+export async function getTeacherPerformanceTrends(classId, subjectId = null) {
+  const data = await request(
+    `/api/teacher/analytics/class/${classId}/trends`,
+    { query: { subjectId }, fallback: `Failed to fetch performance trends for class ${classId}` }
+  );
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Generate a downloadable analytics report.
+ * @param {number} classId
+ * @param {number|null} subjectId
+ * @param {string} reportType  e.g. "CLASS_PERFORMANCE"
+ * @param {string} [format="PDF"]
+ * @returns {Promise<{fileName:string, fileUrl:string, fileType:string}>}
+ */
+export async function generateTeacherReport(classId, subjectId, reportType, format = 'PDF') {
+  const data = await request(
+    `/api/teacher/analytics/class/${classId}/reports/generate`,
+    {
+      query: { subjectId, reportType, format },
+      fallback: `Failed to generate report for class ${classId}`,
+    }
+  );
+  return data ?? {};
 }

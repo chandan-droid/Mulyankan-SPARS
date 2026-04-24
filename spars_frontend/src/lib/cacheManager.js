@@ -10,6 +10,29 @@
 
 const CACHE_PREFIX = 'spars_cache_';
 const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const TOKEN_STORAGE_KEY = 'edutrack_token';
+const USER_STORAGE_KEY = 'edutrack_user';
+
+function _getCacheNamespace() {
+  try {
+    const rawUser = sessionStorage.getItem(USER_STORAGE_KEY);
+    if (rawUser) {
+      const user = JSON.parse(rawUser);
+      if (user?.id != null) return `user:${user.id}`;
+      if (user?.email) return `user:${user.email}`;
+    }
+
+    const token = sessionStorage.getItem(TOKEN_STORAGE_KEY);
+    if (token) return `auth:${token.slice(0, 24)}`;
+  } catch {
+    // Ignore and use anonymous scope.
+  }
+  return 'anon';
+}
+
+function _buildCacheKey(url) {
+  return `${CACHE_PREFIX}${_getCacheNamespace()}:${url}`;
+}
 
 /* ── Read ──────────────────────────────────────────────────────────────── */
 
@@ -20,11 +43,23 @@ const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
  */
 export function cacheGet(url) {
   try {
-    const raw = localStorage.getItem(CACHE_PREFIX + url);
+    const scopedKey = _buildCacheKey(url);
+    const legacyKey = CACHE_PREFIX + url;
+    let raw = localStorage.getItem(scopedKey);
+
+    // Backward-compatible read: migrate old unscoped cache entries.
+    if (!raw) {
+      raw = localStorage.getItem(legacyKey);
+      if (raw) {
+        localStorage.setItem(scopedKey, raw);
+      }
+    }
+
     if (!raw) return null;
     const entry = JSON.parse(raw);
     if (Date.now() - entry.ts > MAX_AGE_MS) {
-      localStorage.removeItem(CACHE_PREFIX + url);
+      localStorage.removeItem(scopedKey);
+      localStorage.removeItem(legacyKey);
       return null;
     }
     return entry.data;
@@ -44,11 +79,11 @@ export function cacheGet(url) {
 export function cacheSet(url, data) {
   const payload = JSON.stringify({ data, ts: Date.now() });
   try {
-    localStorage.setItem(CACHE_PREFIX + url, payload);
+    localStorage.setItem(_buildCacheKey(url), payload);
   } catch {
     cachePurgeExpired();
     try {
-      localStorage.setItem(CACHE_PREFIX + url, payload);
+      localStorage.setItem(_buildCacheKey(url), payload);
     } catch {
       // Storage still full – skip silently (cache is best-effort)
     }

@@ -4,6 +4,10 @@ import { adminNavItems } from './Dashboard';
 import {
   createAdminTeacherAssignment,
   deleteAdminTeacherAssignment,
+  getCachedAdminTeacherAssignments,
+  getCachedAdminClasses,
+  getCachedAdminSubjects,
+  getCachedAdminTeachers,
   getAdminTeacherAssignments,
   getAdminClasses,
   getAdminSubjects,
@@ -54,11 +58,22 @@ const classLabel = (c) =>
   `${c.branch} • Sem ${c.semester} • Sec ${c.section} • ${c.academic_year}`;
 
 export default function TeacherManagement() {
-  const [teachers, setTeachers] = useState([]);
-  const [subjects, setSubjects] = useState([]);
-  const [classes, setClasses] = useState([]);
-  const [assignments, setAssignments] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedTeachers = useMemo(() => getCachedAdminTeachers(), []);
+  const cachedSubjects = useMemo(() => getCachedAdminSubjects(), []);
+  const cachedClasses = useMemo(() => getCachedAdminClasses(), []);
+  const cachedAssignments = useMemo(() => getCachedAdminTeacherAssignments(), []);
+  const [teachers, setTeachers] = useState(cachedTeachers);
+  const [subjects, setSubjects] = useState(cachedSubjects);
+  const [classes, setClasses] = useState(cachedClasses);
+  const [assignments, setAssignments] = useState(cachedAssignments);
+  const [loading, setLoading] = useState(
+    !(
+      cachedTeachers.length > 0 ||
+      cachedSubjects.length > 0 ||
+      cachedClasses.length > 0 ||
+      cachedAssignments.length > 0
+    )
+  );
 
   const [searchTerm, setSearchTerm] = useState('');
   const [deptFilter, setDeptFilter] = useState('all');
@@ -89,9 +104,14 @@ export default function TeacherManagement() {
     [teachers]
   );
 
-  const refresh = async () => {
+  const refresh = async (silent = false) => {
     try {
-      setLoading(true);
+      if (
+        !silent ||
+        !(teachers.length > 0 || subjects.length > 0 || classes.length > 0 || assignments.length > 0)
+      ) {
+        setLoading(true);
+      }
       const [teacherData, subjectData, classData] = await Promise.all([
         getAdminTeachers(),
         getAdminSubjects(),
@@ -110,7 +130,7 @@ export default function TeacherManagement() {
   };
 
   useEffect(() => {
-    refresh();
+    refresh(true);
   }, []);
 
   const filteredTeachers = useMemo(() => {

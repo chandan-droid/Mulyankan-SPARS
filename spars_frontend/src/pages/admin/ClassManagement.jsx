@@ -5,6 +5,8 @@ import * as XLSX from 'xlsx';
 import {
   createAdminClass,
   deleteAdminClass,
+  getCachedAdminClasses,
+  getCachedAdminStudents,
   getAdminClasses,
   getAdminStudents,
   updateAdminClass,
@@ -69,9 +71,13 @@ const classLabel = (c) =>
   `${c.branch} Sem ${c.semester} Sec ${c.section} • ${c.academic_year}`;
 
 export default function ClassManagement() {
-  const [classes, setClasses] = useState([]);
-  const [students, setStudents] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedClasses = useMemo(() => getCachedAdminClasses(), []);
+  const cachedStudents = useMemo(() => getCachedAdminStudents(), []);
+  const [classes, setClasses] = useState(cachedClasses);
+  const [students, setStudents] = useState(cachedStudents);
+  const [loading, setLoading] = useState(
+    !(cachedClasses.length > 0 || cachedStudents.length > 0)
+  );
   const [search, setSearch] = useState('');
   const [filterBranch, setFilterBranch] = useState('All');
   const [filterSemester, setFilterSemester] = useState('All');
@@ -86,9 +92,11 @@ export default function ClassManagement() {
   const [openImport, setOpenImport] = useState(false);
   const fileInputRef = useRef(null);
 
-  const refresh = async () => {
+  const refresh = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent || !(classes.length > 0 || students.length > 0)) {
+        setLoading(true);
+      }
       const [classItems, studentItems] = await Promise.all([
         getAdminClasses(),
         getAdminStudents(),
@@ -103,7 +111,7 @@ export default function ClassManagement() {
   };
 
   useEffect(() => {
-    refresh();
+    refresh(true);
   }, []);
 
   const studentCounts = useMemo(() => {

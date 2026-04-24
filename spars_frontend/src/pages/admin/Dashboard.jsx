@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
@@ -16,6 +16,13 @@ import {
   getClasses, getTeacherAssignments, getMarks,
 } from '@/data/store';
 import {
+  getCachedAdminAssessments,
+  getCachedAdminClasses,
+  getCachedAdminMarks,
+  getCachedAdminStudents,
+  getCachedAdminSubjects,
+  getCachedAdminTeacherAssignments,
+  getCachedAdminTeachers,
   getAdminStudents,
   getAdminSubjects,
   getAdminTeachers,
@@ -43,14 +50,19 @@ export { navItems as adminNavItems };
 /* ── helpers ─────────────────────────────────────────────────────────────── */
 const PALETTE = ['hsl(var(--primary))', 'hsl(195 85% 48%)', 'hsl(168 60% 48%)'];
 
-function pct(n, d) { return d ? Math.round((n / d) * 100) : 0; }
-
 const TOOLTIP_STYLE = {
   borderRadius: '10px',
   border: '1px solid hsl(var(--border))',
   background: 'hsl(var(--background))',
   fontSize: 12,
 };
+
+function formatClassFull(item) {
+  if (!item) return 'Class details unavailable';
+  const academicYear = item.academicYear ?? item.academic_year;
+  const base = `${item.branch || 'Branch N/A'} • Semester ${item.semester ?? 'N/A'} • Section ${item.section || 'N/A'}`;
+  return academicYear ? `${base} • ${academicYear}` : base;
+}
 
 /* ── small reusable atoms ──────────────────────────────────────────────────  */
 function StatCard({ label, value, helper, tone, icon: Icon, onClick }) {
@@ -78,45 +90,61 @@ function StatCard({ label, value, helper, tone, icon: Icon, onClick }) {
   );
 }
 
-function HealthBar({ label, value, note }) {
-  const color = value >= 70 ? 'bg-emerald-500' : value >= 40 ? 'bg-amber-500' : 'bg-rose-500';
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-medium text-foreground">{label}</p>
-        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${value >= 70 ? 'bg-emerald-500/10 text-emerald-600' : value >= 40 ? 'bg-amber-500/10 text-amber-600' : 'bg-rose-500/10 text-rose-600'}`}>{value}%</span>
-      </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
-        <div className={`h-full rounded-full transition-all duration-700 ${color}`} style={{ width: `${value}%` }} />
-      </div>
-      <p className="text-[10px] text-muted-foreground">{note}</p>
-    </div>
-  );
-}
-
 /* ── main component ───────────────────────────────────────────────────────── */
 export default function AdminDashboard() {
   const navigate = useNavigate();
 
-  const [loadingLiveData, setLoadingLiveData] = useState(true);
+  const warmDashboardData = useMemo(() => {
+    const localData = {
+      students: getStudents(),
+      subjects: getSubjects(),
+      teachers: getTeachers(),
+      assessments: getAssessments(),
+      classes: getClasses(),
+      assignments: getTeacherAssignments(),
+      marks: getMarks(),
+    };
+
+    const cachedData = {
+      students: getCachedAdminStudents(),
+      subjects: getCachedAdminSubjects(),
+      teachers: getCachedAdminTeachers(),
+      assessments: getCachedAdminAssessments(),
+      classes: getCachedAdminClasses(),
+      assignments: getCachedAdminTeacherAssignments(),
+      marks: getCachedAdminMarks(),
+    };
+
+    return {
+      students: cachedData.students.length > 0 ? cachedData.students : localData.students,
+      subjects: cachedData.subjects.length > 0 ? cachedData.subjects : localData.subjects,
+      teachers: cachedData.teachers.length > 0 ? cachedData.teachers : localData.teachers,
+      assessments:
+        cachedData.assessments.length > 0 ? cachedData.assessments : localData.assessments,
+      classes: cachedData.classes.length > 0 ? cachedData.classes : localData.classes,
+      assignments:
+        cachedData.assignments.length > 0 ? cachedData.assignments : localData.assignments,
+      marks: cachedData.marks.length > 0 ? cachedData.marks : localData.marks,
+    };
+  }, []);
+
+  const [loadingLiveData, setLoadingLiveData] = useState(
+    !Object.values(warmDashboardData).some((arr) => Array.isArray(arr) && arr.length > 0)
+  );
   const [selectedSubjectId, setSelectedSubjectId] = useState('');
   const [selectedClassId, setSelectedClassId] = useState('ALL');
   const [selectedStudentId, setSelectedStudentId] = useState('ALL');
   const [coData, setCoData] = useState([]);
   const [loadingCo, setLoadingCo] = useState(false);
 
-  const [dashboardData, setDashboardData] = useState(() => ({
-    students: getStudents(),
-    subjects: getSubjects(),
-    teachers: getTeachers(),
-    assessments: getAssessments(),
-    classes: getClasses(),
-    assignments: getTeacherAssignments(),
-    marks: getMarks(),
-  }));
+  const [dashboardData, setDashboardData] = useState(warmDashboardData);
 
   useEffect(() => {
     let cancelled = false;
+    const hasWarmStartData = Object.values(warmDashboardData).some(
+      (arr) => Array.isArray(arr) && arr.length > 0
+    );
+    if (!hasWarmStartData) setLoadingLiveData(true);
 
     const loadDashboardData = async () => {
       const localData = {
@@ -246,7 +274,7 @@ export default function AdminDashboard() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [warmDashboardData]);
 
   useEffect(() => {
     if (!selectedSubjectId && dashboardData.subjects.length > 0) {
@@ -323,10 +351,8 @@ export default function AdminDashboard() {
     students.reduce((acc, s) => { const k = `Sem ${s.semester || '?'}`; acc[k] = (acc[k] || 0) + 1; return acc; }, {})
   ).map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
 
-  /* health */
-  const assessedSubs     = new Set(assessments.map(a => a.subjectId).filter(Boolean)).size;
+  /* assignments metric */
   const assignedTeachers = new Set(assignments.map(a => a.teacherId).filter(Boolean)).size;
-  const coveredSubs      = new Set(assignments.map(a => a.subjectId).filter(Boolean)).size;
 
   /* recent roster */
   const classRoster = classes.map(c => ({
@@ -457,7 +483,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* ── Bottom Row ───────────────────────────────────────── */}
-        <div className="grid gap-4 lg:grid-cols-[1fr_0.85fr_0.85fr]">
+        <div className="grid gap-4 lg:grid-cols-2">
           {/* Recent students table */}
           <div className="rounded-2xl border border-border/50 bg-card/70 p-5 backdrop-blur-sm shadow-sm">
             <div className="mb-4 flex items-center justify-between">
@@ -476,7 +502,7 @@ export default function AdminDashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border/50 text-left">
-                    {['Student', 'Branch', 'Sem', 'Reg. No.'].map(h => (
+                    {['Student', 'Branch', 'Semester', 'Reg. No.'].map(h => (
                       <th key={h} className="pb-2.5 pr-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">{h}</th>
                     ))}
                   </tr>
@@ -498,36 +524,6 @@ export default function AdminDashboard() {
                   )}
                 </tbody>
               </table>
-            </div>
-          </div>
-
-          {/* Health signals */}
-          <div className="rounded-2xl border border-border/50 bg-card/70 p-5 backdrop-blur-sm shadow-sm">
-            <div className="mb-5 flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg stat-gradient-teal shadow">
-                <ShieldCheck className="h-3.5 w-3.5 text-white" />
-              </div>
-              <div>
-                <p className="text-sm font-heading font-semibold text-foreground">System Health</p>
-                <p className="text-[11px] text-muted-foreground">Operational coverage</p>
-              </div>
-            </div>
-            <div className="space-y-4">
-              <HealthBar
-                label="Assessment Coverage"
-                value={pct(assessedSubs, totalSubjects)}
-                note={`${assessedSubs} of ${totalSubjects} subjects`}
-              />
-              <HealthBar
-                label="Teacher Utilization"
-                value={pct(assignedTeachers, totalTeachers)}
-                note={`${assignedTeachers} of ${totalTeachers} assigned`}
-              />
-              <HealthBar
-                label="Subject Coverage"
-                value={pct(coveredSubs, totalSubjects)}
-                note={`${coveredSubs} of ${totalSubjects} mapped`}
-              />
             </div>
           </div>
 
@@ -554,7 +550,7 @@ export default function AdminDashboard() {
                       <div key={key} className="space-y-1.5">
                         <div className="flex items-center justify-between gap-2">
                           <p className="text-xs font-medium text-foreground truncate">
-                            {c.branch} S{c.semester}{c.section}
+                            {formatClassFull(c)}
                           </p>
                           <span className="text-[11px] font-bold text-foreground shrink-0">{c.studentCount}</span>
                         </div>
@@ -591,7 +587,7 @@ export default function AdminDashboard() {
                 <SelectContent>
                   {subjects.map(s => (
                     <SelectItem key={s.id} value={String(s.id)}>
-                      {s.subjectCode}
+                      {s.subjectName || `Subject ${s.id}`}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -604,7 +600,7 @@ export default function AdminDashboard() {
                 <SelectContent>
                   <SelectItem value="ALL">All Classes</SelectItem>
                   {availableClasses.map(c => (
-                    <SelectItem key={c.id} value={String(c.id)}>{c.branch} S{c.semester}{c.section}</SelectItem>
+                    <SelectItem key={c.id} value={String(c.id)}>{formatClassFull(c)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

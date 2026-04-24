@@ -40,7 +40,7 @@ export function getGrade(percentage) {
 
 export function getPerformanceColor(percentage) {
   if (percentage >= 75) return '#16a34a';
-  if (percentage >= 50) return '#eab308';
+  if (percentage >= 40) return '#eab308';
   return '#ef4444';
 }
 
@@ -117,6 +117,125 @@ function sectionTitle(doc, text, y) {
   return y + 8;
 }
 
+function hexToRgb(hexStr, fallback = [79, 70, 229]) {
+  if (Array.isArray(hexStr)) return hexStr;
+  let hex = (hexStr || '').replace('#', '');
+  if (hex.length === 3) hex = hex.split('').map(c => c+c).join('');
+  if (hex.length === 6) {
+    return [parseInt(hex.slice(0,2), 16), parseInt(hex.slice(2,4), 16), parseInt(hex.slice(4,6), 16)];
+  }
+  return fallback;
+}
+
+function drawSummaryCards(doc, startY, cards) {
+  const count = cards.length;
+  if (count === 0) return startY;
+  const padding = 14;
+  const totalWidth = 210 - (padding * 2);
+  const spacing = 4;
+  const cardWidth = (totalWidth - (spacing * (count - 1))) / count;
+  const cardHeight = 18;
+
+  cards.forEach((card, i) => {
+    const x = padding + (i * (cardWidth + spacing));
+    
+    // Background and border
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(x, startY, cardWidth, cardHeight, 2, 2, 'F');
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(x, startY, cardWidth, cardHeight, 2, 2, 'S');
+    
+    // Label
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(100, 116, 139);
+    const labelUpper = (card.label || '').toUpperCase();
+    doc.text(labelUpper, x + (cardWidth/2), startY + 6, { align: 'center' });
+    
+    // Value
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    const [r, g, b] = hexToRgb(card.color || '#3b82f6');
+    doc.setTextColor(r, g, b);
+    doc.text(String(card.value), x + (cardWidth/2), startY + 15, { align: 'center' });
+  });
+
+  return startY + cardHeight + 6;
+}
+
+function drawBarChart(doc, data, startX, startY, width, height, title) {
+  if (!data || data.length === 0) return startY;
+
+  // Chart Container
+  doc.setFillColor(252, 253, 255);
+  doc.roundedRect(startX, startY, width, height, 3, 3, 'F');
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(startX, startY, width, height, 3, 3, 'S');
+
+  if (title) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(51, 65, 85);
+    doc.text(title, startX + 5, startY + 6);
+  }
+
+  const chartTop = startY + 12;
+  const chartHeight = height - 20;
+  const chartWidth = width - 18;
+  const chartLeft = startX + 12;
+  
+  const maxDataVal = Math.max(...data.map(d => d.max ?? d.value ?? 0));
+  const chartMax = Math.max(maxDataVal, 10) === 10 ? 10 : Math.ceil(maxDataVal / 10) * 10;
+  
+  // Draw grid lines
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.1);
+  [0, 0.25, 0.5, 0.75, 1].forEach(pct => {
+    const y = chartTop + chartHeight - (pct * chartHeight);
+    doc.line(chartLeft, y, chartLeft + chartWidth, y);
+    doc.setFontSize(6);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(148, 163, 184);
+    doc.text(String(Math.round(chartMax * pct)), chartLeft - 2, y + 2, { align: 'right' });
+  });
+
+  if (data.length > 0) {
+    const presetBarWidth = Math.min((chartWidth / data.length) * 0.5, 14);
+    const spacing = (chartWidth - (presetBarWidth * data.length)) / (data.length + 1);
+
+    data.forEach((d, i) => {
+      const x = chartLeft + spacing + (i * (presetBarWidth + spacing));
+      const valPct = Math.min((d.value / chartMax), 1);
+      const barHeight = valPct * chartHeight;
+      const [r, g, b] = hexToRgb(d.color || getPerformanceColor((d.value/(d.max||chartMax))*100));
+
+      if (d.max) {
+         doc.setFillColor(241, 245, 249);
+         doc.rect(x, chartTop, presetBarWidth, chartHeight, 'F');
+      }
+
+      doc.setFillColor(r, g, b);
+      doc.rect(x, chartTop + chartHeight - barHeight, presetBarWidth, barHeight, 'F');
+
+      doc.setFontSize(6.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(71, 85, 105);
+      
+      const label = d.label.length > 8 ? d.label.substring(0,6)+'..' : d.label;
+      doc.text(label, x + (presetBarWidth / 2), chartTop + chartHeight + 5, { align: 'center' });
+      
+      doc.setFontSize(6);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(r, g, b);
+      const valText = d.displayValue || String(Math.round(d.value));
+      doc.text(valText, x + (presetBarWidth / 2), chartTop + chartHeight - barHeight - 2, { align: 'center' });
+    });
+  }
+  return startY + height + 6;
+}
+
 // ─────────────────────────────────────────────
 // Student Performance PDF
 // ─────────────────────────────────────────────
@@ -124,26 +243,43 @@ export async function exportStudentReportPDF(report) {
   const doc = new jsPDF();
   await drawHeader(doc, 'Student Performance Report');
 
-  let y = infoBox(doc, [
+  // Summary Metrics Section
+  let y = 46;
+  const gradeObj = getGrade(parseFloat(report.percentage));
+  const isPass = parseFloat(report.percentage) >= 40;
+  
+  y = drawSummaryCards(doc, y, [
+    { label: 'Overall Score', value: `${report.totalMarks} / ${report.maxPossible}`, color: '#3b82f6' },
+    { label: 'Percentage', value: `${report.percentage}%`, color: getPerformanceColor(parseFloat(report.percentage)) },
+    { label: 'Grade', value: report.grade, color: gradeObj.color },
+    { label: 'Status', value: isPass ? 'Pass' : 'Fail', color: isPass ? '#10b981' : '#ef4444' }
+  ]);
+
+  y = infoBox(doc, [
     ['Name',     report.studentName],
     ['Reg. No.', report.regNo],
-    ['Branch',   report.branch],
-    ['Semester', String(report.semester)],
-    ['Section',  report.section],
-  ], 46);
+    ['Class Details', `${report.branch} — Semester ${report.semester} (Section ${report.section})`],
+  ], y);
+  
+  // Assessment Breakdown Graph
+  const graphData = report.rows.map(r => ({
+    label: r.type,
+    value: parseFloat(r.marks),
+    max: parseFloat(r.maxMarks),
+    displayValue: `${r.marks} / ${r.maxMarks}`,
+    color: '#0ea5e9'
+  }));
 
-  y = sectionTitle(doc, 'Assessment Breakdown', y + 4);
+  y = drawBarChart(doc, graphData, 14, y, 182, 50, 'Assessment Performance Chart');
+
+  if (y + 30 > 280) { doc.addPage(); y = 20; }
+  y = sectionTitle(doc, 'Score Table', y);
 
   autoTable(doc, {
     startY: y,
     head: [['Subject', 'Assessment Type', 'Marks', 'Max', 'Percentage', 'Grade']],
     body: report.rows.map(r => [
-      r.subject,
-      r.type,
-      r.marks,
-      r.maxMarks,
-      r.percentage + '%',
-      getGrade(parseFloat(r.percentage)).grade,
+      r.subject, r.type, r.marks, r.maxMarks, r.percentage + '%', getGrade(parseFloat(r.percentage)).grade,
     ]),
     headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold', fontSize: 8 },
     alternateRowStyles: { fillColor: [248, 250, 255] },
@@ -160,17 +296,21 @@ export async function exportStudentReportPDF(report) {
 
   y = doc.lastAutoTable.finalY + 8;
 
-  // CO Attainment table (if provided)
   if (report.coData && report.coData.length > 0) {
-    y = sectionTitle(doc, 'Course Outcome (CO) Attainment', y + 4);
+    if (y + 50 > 280) { doc.addPage(); y = 20; }
+    
+    const coGraphData = report.coData.map(co => ({
+      label: co.co, value: parseFloat(co.avg), max: 100, displayValue: `${co.avg}%`,
+      color: parseFloat(co.avg) >= 60 ? '#10b981' : '#ef4444' // CO Threshold assumes 60 based on older code
+    }));
+    
+    y = drawBarChart(doc, coGraphData, 14, y, 182, 45, 'Course Outcome (CO) Attainment');
+    
     autoTable(doc, {
       startY: y,
       head: [['CO', 'Obtained', 'Max', 'Attainment %', 'Status']],
       body: report.coData.map(co => [
-        co.co,
-        co.obtained,
-        co.max,
-        co.avg + '%',
+        co.co, co.obtained, co.max, co.avg + '%',
         co.avg >= 60 ? '✓ Attained' : '✗ Not Attained',
       ]),
       headStyles: { fillColor: [22, 120, 100], textColor: 255, fontStyle: 'bold', fontSize: 8 },
@@ -183,22 +323,7 @@ export async function exportStudentReportPDF(report) {
         }
       },
     });
-    y = doc.lastAutoTable.finalY + 8;
   }
-
-  // Summary box
-  if (y + 28 > 280) { doc.addPage(); y = 20; }
-  doc.setFillColor(250, 245, 255);
-  doc.roundedRect(14, y, 182, 28, 4, 4, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.setTextColor(126, 34, 206);
-  doc.text('Summary', 20, y + 10);
-  doc.setFontSize(9);
-  doc.setTextColor(31, 41, 55);
-  doc.text(`Total: ${report.totalMarks} / ${report.maxPossible}`, 20, y + 20);
-  doc.text(`Percentage: ${report.percentage}%`, 80, y + 20);
-  doc.text(`Grade: ${report.grade}`, 152, y + 20);
 
   doc.save(`${report.studentName.replace(/ /g, '_')}_report.pdf`);
 }
@@ -210,50 +335,62 @@ export async function exportClassReportPDF(classLabel, rows, avgPct, passCount, 
   const doc = new jsPDF();
   await drawHeader(doc, 'Class Performance Report', `| ${classLabel}`);
 
-  let y = 46;
-  y = infoBox(doc, [
-    ['Class',     classLabel],
-    ['Students',  rows.length],
-    ['Avg Score', avgPct + '%'],
-    ['Pass / Fail', `${passCount} / ${failCount}`],
-  ], y);
+  const numericAvg = Number(avgPct) || 0;
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const topStudent = safeRows.length > 0 ? safeRows[0] : null;
+  const atRiskCount = safeRows.filter((r) => Number(r.pct ?? r.percentage ?? 0) < 40).length;
 
-  y = sectionTitle(doc, 'Student Performance Roster', y + 4);
+  let y = 46;
+  y = drawSummaryCards(doc, y, [
+    { label: 'Total Students', value: safeRows.length, color: '#0ea5e9' },
+    { label: 'Class Average', value: `${numericAvg.toFixed(1)}%`, color: '#6366f1' },
+    { label: 'Passed Students', value: passCount, color: '#10b981' },
+    { label: 'At Risk (<40%)', value: atRiskCount, color: '#ef4444' }
+  ]);
+  
+  // Histogram bucketing logic
+  const buckets = [0,0,0,0]; // <40, 40-59, 60-74, 75-100
+  safeRows.forEach(r => {
+    const val = Number(r.pct ?? r.percentage ?? 0);
+    if (val < 40) buckets[0]++;
+    else if (val < 60) buckets[1]++;
+    else if (val < 75) buckets[2]++;
+    else buckets[3]++;
+  });
+  
+  const distGraph = [
+    { label: 'Fail (<40%)', value: buckets[0], max: safeRows.length, color: '#ef4444' },
+    { label: 'Avg (40-59%)', value: buckets[1], max: safeRows.length, color: '#f59e0b' },
+    { label: 'Good (60-74%)', value: buckets[2], max: safeRows.length, color: '#6366f1' },
+    { label: 'Exc. (75%+)', value: buckets[3], max: safeRows.length, color: '#10b981' }
+  ];
+  
+  y = drawBarChart(doc, distGraph, 14, y, 182, 45, 'Grade Distribution Overview');
+
+  y = sectionTitle(doc, 'Student Roster', y);
 
   autoTable(doc, {
     startY: y,
-    head: [['#', 'Student Name', 'Reg. No.', 'Total', 'Max', 'Percentage', 'Grade', 'Percentile', 'Status']],
-    body: rows.map((r, i) => [
+    head: [['#', 'Student Name', 'Reg. No.', 'Tot/40', 'PCT', 'Grade', 'Status']],
+    body: safeRows.map((r, i) => [
       i + 1,
-      r.name,
+      r.name.length > 20 ? r.name.substring(0,20)+'..' : r.name,
       r.regNo,
-      r.totalMarks,
-      r.maxPossible,
-      r.percentage + '%',
+      Number(r.totalOutOf40 ?? ((Number(r.pct ?? r.percentage ?? 0) * 0.4))).toFixed(1),
+      `${Number(r.pct ?? r.percentage ?? 0).toFixed(1)}%`,
       r.grade,
-      r.percentile ? r.percentile + '%' : '—',
       r.status,
     ]),
     headStyles: { fillColor: [14, 165, 233], textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
     alternateRowStyles: { fillColor: [248, 250, 255] },
     styles: { fontSize: 7.5, cellPadding: 2.5 },
     didParseCell: data => {
-      if (data.column.index === 8 && data.section === 'body') {
+      if (data.column.index === 6 && data.section === 'body') {
         data.cell.styles.textColor = data.cell.raw === 'Pass' ? [22,163,74] : [220,38,38];
         data.cell.styles.fontStyle = 'bold';
       }
     },
   });
-
-  const fy = doc.lastAutoTable.finalY + 10;
-  if (fy + 22 <= 280) {
-    doc.setFillColor(239, 246, 255);
-    doc.roundedRect(14, fy, 182, 18, 4, 4, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(2, 132, 199);
-    doc.text(`Class Avg: ${avgPct}%   |   Pass: ${passCount}   |   Fail: ${failCount}`, 20, fy + 12);
-  }
 
   doc.save(`Class_${classLabel.replace(/ /g, '_')}_report.pdf`);
 }
@@ -265,8 +402,28 @@ export async function exportCOAttainmentPDF(classLabel, coData, threshold = 60) 
   const doc = new jsPDF();
   await drawHeader(doc, 'CO Attainment Report', `| ${classLabel}`);
 
+  const attainedCount = coData.filter(c => c.avg >= threshold).length;
+  const overallAvg = coData.length > 0 ? (coData.reduce((s, c) => s + c.avg, 0) / coData.length).toFixed(1) : 0;
+
   let y = 46;
-  y = sectionTitle(doc, `Course Outcome Attainment — ${classLabel} (Threshold: ${threshold}%)`, y + 2);
+  y = drawSummaryCards(doc, y, [
+    { label: 'Total COs', value: coData.length, color: '#3b82f6' },
+    { label: 'COs Attained', value: attainedCount, color: '#10b981' },
+    { label: 'Target Set', value: `${threshold}%`, color: '#f59e0b' },
+    { label: 'Avg Attainment', value: `${overallAvg}%`, color: '#6366f1' }
+  ]);
+
+  const coGraphData = coData.map((co, idx) => ({
+    label: `CO ${co.co || (idx + 1)}`,
+    value: parseFloat(co.avg),
+    max: 100,
+    displayValue: `${co.avg}%`,
+    color: parseFloat(co.avg) >= threshold ? '#10b981' : '#ef4444'
+  }));
+
+  y = drawBarChart(doc, coGraphData, 14, y, 182, 50, `CO Attainment Overview (Threshold: ${threshold}%)`);
+
+  y = sectionTitle(doc, `CO Attainment Details`, y);
 
   autoTable(doc, {
     startY: y,
@@ -289,20 +446,6 @@ export async function exportCOAttainmentPDF(classLabel, coData, threshold = 60) 
       }
     },
   });
-
-  const attained = coData.filter(c => c.avg >= threshold).length;
-  const fy = doc.lastAutoTable.finalY + 10;
-  if (fy + 28 <= 280) {
-    doc.setFillColor(236, 253, 245);
-    doc.roundedRect(14, fy, 182, 24, 4, 4, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor(5, 150, 105);
-    doc.text('Attainment Summary', 20, fy + 10);
-    doc.setFontSize(9);
-    doc.setTextColor(31, 41, 55);
-    doc.text(`${attained} of ${coData.length} COs attained the ${threshold}% threshold`, 20, fy + 20);
-  }
 
   doc.save(`CO_Attainment_${classLabel.replace(/ /g, '_')}.pdf`);
 }
@@ -340,12 +483,10 @@ export function exportClassRosterExcel(rows, metadata) {
     'Max Possible': r.maxPossible,
     'Percentage (%)': r.pct,
     'Grade': r.grade,
-    'Percentile': r.percentile || '',
     'Status': r.status,
     'MidSem': r.midsem ?? '',
-    'Quiz (Best)': r.quiz ?? '',
-    'Assignment 1': r.assign1 ?? '',
-    'Assignment 2': r.assign2 ?? '',
+    'Quiz': r.quiz ?? '',
+    'Assignment': r.assignment ?? r.assign1 ?? '',
     'Attendance': r.attendance ?? '',
   }));
 

@@ -4,7 +4,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import {
   LayoutDashboard, PenLine, FileBarChart, BookOpen, ClipboardList,
   ArrowUpRight, TrendingUp, Award, CheckCircle, Users, Calendar,
-  BarChart3, Settings, Target,
+  BarChart3, Settings, Target, Zap, School,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -15,17 +15,22 @@ import {
 import { Loader2 } from 'lucide-react';
 import {
   getMyAssignments, getMyAssessments as fetchMyAssessmentsApi,
+  getCachedMyAssignments, getCachedMyAssessments,
   getClassCoAttainment,
+  getTeacherPerformanceTrends, getClassById,
+  getMarksEntryProgress, getAssignmentsByBranch,
 } from '@/lib/teacherApi';
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, CartesianGrid
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, CartesianGrid,
+  LineChart, Line,
 } from 'recharts';
 
 const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard',  path: '/teacher' },
-  { icon: PenLine,         label: 'Mark Entry', path: '/teacher/marks' },
-  { icon: FileBarChart,    label: 'Reports',    path: '/teacher/reports' },
-  { icon: Settings,        label: 'Settings',   path: '/teacher/settings' },
+  { icon: LayoutDashboard, label: 'Dashboard',       path: '/teacher' },
+  { icon: PenLine,         label: 'Mark Entry',      path: '/teacher/marks' },
+  { icon: FileBarChart,    label: 'Reports',         path: '/teacher/reports' },
+  { icon: School,          label: 'Assigned Classes', path: '/teacher/classes' },
+  { icon: Settings,        label: 'Settings',        path: '/teacher/settings' },
 ];
 export { navItems as teacherNavItems };
 
@@ -92,28 +97,51 @@ export default function TeacherDashboard() {
   // Local store (always available as fallback)
   const localAssignments = getAssignmentsForTeacher(user?.id || '');
   const localAssessments = getAssessments();
+  const cachedAssignments = getCachedMyAssignments();
+  const cachedAssessments = getCachedMyAssessments();
 
   const subjects  = getSubjects();
   const students  = getStudents();
   const marks     = getMarks();
 
   // API-fetched state
-  const [apiAssignments, setApiAssignments] = useState(null);
-  const [apiAssessments, setApiAssessments] = useState(null);
-  const [isInitializing, setIsInitializing] = useState(true);
+  const [apiAssignments, setApiAssignments] = useState(
+    cachedAssignments.length > 0 ? cachedAssignments : null
+  );
+  const [apiAssessments, setApiAssessments] = useState(
+    cachedAssessments.length > 0 ? cachedAssessments : null
+  );
+  const hasWarmStartData =
+    cachedAssignments.length > 0 ||
+    cachedAssessments.length > 0 ||
+    localAssignments.length > 0 ||
+    localAssessments.length > 0;
+  const [isInitializing, setIsInitializing] = useState(!hasWarmStartData);
 
   const [selectedAssignmentKey, setSelectedAssignmentKey] = useState('');
   const [coData, setCoData] = useState([]);
   const [loadingCo, setLoadingCo] = useState(false);
 
+  // API-fetched analytics chart data
+  const [apiMarkProgress, setApiMarkProgress] = useState(null); // MarksEntryProgressSummaryDTO
+  const [apiBranchData,   setApiBranchData]   = useState(null); // AssignmentsByBranchDTO[]
+
+  // API-fetched class details (classId -> { id, branch, semester, section, studentCount })
+  const [apiClassDetails, setApiClassDetails] = useState({});
+
+  // Analytics state
+  const [analyticsTrends,   setAnalyticsTrends]   = useState([]);
+
   useEffect(() => {
     let cancelled = false;
-    setIsInitializing(true);
+    if (!hasWarmStartData) setIsInitializing(true);
     
     Promise.allSettled([
       getMyAssignments(),
-      fetchMyAssessmentsApi()
-    ]).then(([assignmentsRes, assessmentsRes]) => {
+      fetchMyAssessmentsApi(),
+      getMarksEntryProgress(),
+      getAssignmentsByBranch(),
+    ]).then(([assignmentsRes, assessmentsRes, markProgressRes, branchDataRes]) => {
       if (cancelled) return;
       if (assignmentsRes.status === 'fulfilled' && assignmentsRes.value?.length > 0) {
         setApiAssignments(assignmentsRes.value);
@@ -121,15 +149,42 @@ export default function TeacherDashboard() {
       if (assessmentsRes.status === 'fulfilled' && assessmentsRes.value?.length > 0) {
         setApiAssessments(assessmentsRes.value);
       }
+      if (markProgressRes.status === 'fulfilled' && markProgressRes.value) {
+        setApiMarkProgress(markProgressRes.value);
+      }
+      if (branchDataRes.status === 'fulfilled' && branchDataRes.value?.length > 0) {
+        setApiBranchData(branchDataRes.value);
+      }
       setIsInitializing(false);
     });
-    
+
     return () => { cancelled = true; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [hasWarmStartData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Use API data when available, else fall back to local store
   const assignments   = apiAssignments  ?? localAssignments;
   const assessments   = apiAssessments  ?? localAssessments;
+
+  // Fetch student counts for each unique classId once assignments are loaded
+  useEffect(() => {
+    if (!assignments.length) return;
+    const uniqueClassIds = [...new Set(assignments.map(a => a.classId).filter(Boolean))];
+    if (!uniqueClassIds.length) return;
+
+    let cancelled = false;
+    Promise.allSettled(uniqueClassIds.map(id => getClassById(id)))
+      .then(results => {
+        if (cancelled) return;
+        const map = {};
+        results.forEach((r, i) => {
+          if (r.status === 'fulfilled' && r.value) {
+            map[uniqueClassIds[i]] = r.value;
+          }
+        });
+        setApiClassDetails(map);
+      });
+    return () => { cancelled = true; };
+  }, [assignments]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!selectedAssignmentKey && assignments.length > 0) {
@@ -150,7 +205,7 @@ export default function TeacherDashboard() {
         if (cancel) return;
         const formatted = (res?.coAttainments || []).map(co => ({
           name: `CO${co.coNumber}`,
-          AvgPercentage: co.attainmentLevel,
+          AvgPercentage: Math.round(Number(co.attainmentLevel) * 10) / 10,
         }));
         setCoData(formatted);
       })
@@ -161,6 +216,22 @@ export default function TeacherDashboard() {
         if (!cancel) setLoadingCo(false);
       });
       return () => { cancel = true; };
+  }, [selectedAssignmentKey]);
+
+  // Fetch analytics whenever the class/subject selection changes
+  useEffect(() => {
+    if (!selectedAssignmentKey) return;
+    const [classId, subjectId] = selectedAssignmentKey.split('|');
+    if (!classId || !subjectId || classId === 'undefined' || subjectId === 'undefined') return;
+
+    let cancel = false;
+    getTeacherPerformanceTrends(classId, subjectId).then((trendData) => {
+      if (cancel) return;
+      setAnalyticsTrends(Array.isArray(trendData) ? trendData : []);
+    }).catch(() => {
+      if (!cancel) setAnalyticsTrends([]);
+    });
+    return () => { cancel = true; };
   }, [selectedAssignmentKey]);
 
   if (isInitializing) {
@@ -174,50 +245,95 @@ export default function TeacherDashboard() {
     );
   }
 
-  /* assessments matching my assignments */
+  /* assessments matching my assignments — prefer classId matching */
   const myAssessments = assessments.filter(a =>
-    assignments.some(
-      x => x.subjectId === a.subjectId && x.branch === a.branch &&
-           x.semester === a.semester && x.section === a.section
-    )
+    assignments.some(x => {
+      const sameSubject = String(x.subjectId) === String(a.subjectId);
+      if (!sameSubject) return false;
+      // API path: classId is authoritative
+      if (x.classId != null && a.classId != null) {
+        return String(x.classId) === String(a.classId);
+      }
+      // Fallback: branch/semester/section matching
+      const cd = apiClassDetails[String(x.classId ?? '')];
+      const branch = cd?.branch ?? x.branch;
+      const semester = cd?.semester ?? x.semester;
+      const section = cd?.section ?? x.section;
+      return branch === a.branch &&
+             Number(semester) === Number(a.semester) &&
+             section === a.section;
+    })
   );
 
 
-  /* unique classes */
+  /* unique classes – keyed by classId|subjectId, enriched with API class details */
   const classMap = {};
   assignments.forEach(a => {
-    const key = `${a.branch}-${a.semester}-${a.section}`;
-    if (!classMap[key]) {
-      classMap[key] = {
+    const mapKey = `${a.classId}|${a.subjectId}`;
+    if (!classMap[mapKey]) {
+      const cd = apiClassDetails[String(a.classId ?? '')] ?? {};
+      const apiCount = cd.studentCount ?? null;
+      const localCount = apiCount !== null ? apiCount : students.filter(
+        s => s.branch === (cd.branch ?? a.branch) &&
+             Number(s.semester) === Number(cd.semester ?? a.semester) &&
+             s.section === (cd.section ?? a.section)
+      ).length;
+      classMap[mapKey] = {
         ...a,
-        studentCount: students.filter(
-          s => s.branch === a.branch &&
-               Number(s.semester) === Number(a.semester) &&
-               s.section === a.section
-        ).length,
+        branch:      cd.branch      ?? a.branch      ?? '—',
+        semester:    cd.semester    ?? a.semester    ?? '—',
+        section:     cd.section     ?? a.section     ?? '—',
+        academicYear: cd.academicYear ?? a.academicYear ?? a.academic_year ?? '',
+        studentCount: localCount,
       };
     }
   });
-  const classList     = Object.values(classMap);
-  const totalStudents = classList.reduce((s, c) => s + c.studentCount, 0);
+  const classList = Object.values(classMap);
+  // Prefer analytics API total (most accurate); sum of class counts as fallback
+  const totalStudents = classList.reduce((s, c) => s + (c.studentCount || 0), 0);
   const uniqueSubs    = [...new Set(assignments.map(a => a.subjectId))];
-  const totalMarks    = marks.filter(m => myAssessments.some(a => a.id === m.assessmentId)).length;
+  const localLoggedMarks = marks.filter(m => myAssessments.some(a => a.id === m.assessmentId)).length;
+  const apiLoggedMarks = (apiMarkProgress?.progressByAssessmentType ?? []).reduce(
+    (sum, item) => sum + Number(item?.recordedAssessments ?? 0),
+    0
+  );
+  const totalMarks = apiLoggedMarks > 0 ? apiLoggedMarks : localLoggedMarks;
 
-  /* chart data */
-  const branchData = Object.entries(
-    assignments.reduce((acc, a) => { const k = a.branch || 'N/A'; acc[k] = (acc[k] || 0) + 1; return acc; }, {})
-  ).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+  /* chart data — use API-resolved branch, prefer API endpoint data */
+  const branchData = apiBranchData
+    ? apiBranchData.map(d => ({ name: d.branch || 'N/A', count: Number(d.assignmentCount) }))
+      .sort((a, b) => b.count - a.count)
+    : Object.entries(
+        assignments.reduce((acc, a) => {
+          const cd = apiClassDetails[String(a.classId ?? '')] ?? {};
+          const k = cd.branch ?? a.branch ?? 'N/A';
+          acc[k] = (acc[k] || 0) + 1;
+          return acc;
+        }, {})
+      ).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
 
   const typeData = Object.entries(
     myAssessments.reduce((acc, a) => { const t = a.type || 'OTHER'; acc[t] = (acc[t] || 0) + 1; return acc; }, {})
   ).map(([name, count]) => ({ name, count }));
 
-  /* progress per assessment type */
-  const markProgress = ASSESS_TYPES.map(type => {
-    const typed = myAssessments.filter(a => a.type === type);
-    const done  = marks.filter(m => typed.some(a => a.id === m.assessmentId)).length;
-    return { type, total: typed.length, done, pct: typed.length ? Math.round((done / typed.length) * 100) : 0 };
-  });
+  /* progress per assessment type — prefer API endpoint, fall back to local computation */
+  const markProgress = apiMarkProgress?.progressByAssessmentType
+    ? apiMarkProgress.progressByAssessmentType.map(item => ({
+        type: item.assessmentType,
+        total: Number(item.totalAssessments ?? 0),
+        done:  Number(item.recordedAssessments ?? 0),
+        pct:   Math.round(Number(item.progressPercentage ?? 0)),
+      }))
+    : ASSESS_TYPES.map(type => {
+        const typed = myAssessments.filter(a => a.type === type);
+        const done  = marks.filter(m => typed.some(a => a.id === m.assessmentId)).length;
+        return { type, total: typed.length, done, pct: typed.length ? Math.round((done / typed.length) * 100) : 0 };
+      });
+
+  /* avg for the header badge */
+  const markProgressAvg = apiMarkProgress?.averageProgressPercentage != null
+    ? Math.round(Number(apiMarkProgress.averageProgressPercentage))
+    : (myAssessments.length ? Math.round((totalMarks / myAssessments.length) * 100) : 0);
 
   const recentAssessments = [...myAssessments]
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
@@ -269,7 +385,7 @@ export default function TeacherDashboard() {
             <div className="mb-4 flex items-center justify-between">
               <p className="text-sm font-heading font-semibold text-foreground">Marks Entry Progress</p>
               <span className="text-[11px] font-semibold text-muted-foreground">
-                {myAssessments.length ? Math.round((totalMarks / myAssessments.length) * 100) : 0}% avg
+                {markProgressAvg}% avg
               </span>
             </div>
             <div className="space-y-4">
@@ -366,15 +482,21 @@ export default function TeacherDashboard() {
             <div className="space-y-2.5">
               {recentAssessments.length === 0 ? (
                 <p className="text-xs text-muted-foreground">No assessments yet.</p>
-              ) : recentAssessments.map(a => (
-                <div key={a.id} className="flex items-center justify-between gap-3 rounded-xl border border-border/40 bg-background/40 px-3 py-2.5">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-foreground truncate">{a.name || a.type}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">{a.branch} · Sem {a.semester} · Sec {a.section}</p>
+              ) : recentAssessments.map(a => {
+                const cd = apiClassDetails[String(a.classId ?? '')] ?? {};
+                const branch   = cd.branch   ?? a.branch   ?? '—';
+                const semester = cd.semester ?? a.semester ?? '—';
+                const section  = cd.section  ?? a.section  ?? '—';
+                return (
+                  <div key={a.id} className="flex items-center justify-between gap-3 rounded-xl border border-border/40 bg-background/40 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-foreground truncate">{a.name || a.type}</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{branch} · Sem {semester} · Sec {section}</p>
+                    </div>
+                    <span className="shrink-0 rounded-md bg-muted/60 px-2 py-0.5 text-[10px] font-semibold text-foreground">{a.type}</span>
                   </div>
-                  <span className="shrink-0 rounded-md bg-muted/60 px-2 py-0.5 text-[10px] font-semibold text-foreground">{a.type}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -392,10 +514,13 @@ export default function TeacherDashboard() {
               ) : classList.slice(0, 5).map(c => {
                 const sub = subjects.find(s => s.id === c.subjectId);
                 return (
-                  <div key={`${c.branch}-${c.semester}-${c.section}-${c.subjectId}`} className="flex items-center justify-between gap-3 rounded-xl border border-border/40 bg-background/40 px-3 py-2.5">
+                  <div key={`${c.classId}-${c.subjectId}`} className="flex items-center justify-between gap-3 rounded-xl border border-border/40 bg-background/40 px-3 py-2.5">
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-foreground truncate">{sub?.subjectName || c.subjectId}</p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">{c.branch} · Sem {c.semester} · Sec {c.section}</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        {c.branch} · Sem {c.semester} · Sec {c.section}
+                        {c.academicYear ? <> · {c.academicYear}</> : null}
+                      </p>
                     </div>
                     <span className="shrink-0 rounded-md bg-muted/60 px-2 py-0.5 text-[10px] font-semibold text-foreground">{c.studentCount} stu.</span>
                   </div>
@@ -470,9 +595,17 @@ export default function TeacherDashboard() {
                 <SelectContent>
                   {assignments.map(a => {
                     const sub = subjects.find(s => s.id === a.subjectId);
+                    const cd = apiClassDetails[String(a.classId ?? '')] ?? {};
+                    const branch   = cd.branch   ?? a.branch   ?? '—';
+                    const semester = cd.semester ?? a.semester ?? '—';
+                    const section  = cd.section  ?? a.section  ?? '—';
+                    const ayear    = cd.academicYear ?? '';
                     return (
                       <SelectItem key={`${a.classId}|${a.subjectId}`} value={`${a.classId}|${a.subjectId}`}>
-                        {sub?.subjectCode} {a.branch} S{a.semester}{a.section}
+                        <span className="font-medium">{sub?.subjectCode || sub?.subjectName || a.subjectId}</span>
+                        <span className="ml-1.5 text-muted-foreground">
+                          {branch} S{semester}{section}{ayear ? ` · ${ayear}` : ''}
+                        </span>
                       </SelectItem>
                     );
                   })}
@@ -507,6 +640,30 @@ export default function TeacherDashboard() {
              )}
           </div>
         </div>
+
+        {/* ── Performance Trends ──────────────────────────────────────── */}
+        {analyticsTrends.length > 0 && (
+          <div className="rounded-2xl border border-border/50 bg-card/70 p-5 backdrop-blur-sm shadow-sm mt-6">
+            <div className="mb-4 flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg stat-gradient-teal shadow">
+                <Zap className="h-3.5 w-3.5 text-white" />
+              </div>
+              <p className="text-sm font-heading font-semibold text-foreground">Performance Trend</p>
+            </div>
+            <div className="h-[200px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={analyticsTrends} margin={{ top: 6, right: 6, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={11} stroke="hsl(var(--muted-foreground))" />
+                  <YAxis domain={[0, 100]} tickLine={false} axisLine={false} fontSize={11} stroke="hsl(var(--muted-foreground))" />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} />
+                  <Line type="monotone" dataKey="value" name="Avg %" stroke="hsl(235,65%,58%)" strokeWidth={2.5}
+                    dot={{ r: 4, fill: 'hsl(235,65%,58%)', strokeWidth: 0 }} activeDot={{ r: 6 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
 
       </div>
     </DashboardLayout>

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
@@ -22,26 +22,48 @@ export default function AdminSubjectTab({ reportData }) {
     : [];
   const [selSubjectWise, setSelSubjectWise] = useState('');
 
+  useEffect(() => {
+    if (!allSubjects.length) {
+      setSelSubjectWise('');
+      return;
+    }
+
+    const exists = allSubjects.some((subject) => String(subject.id) === String(selSubjectWise));
+    if (!exists) {
+      setSelSubjectWise(String(allSubjects[0].id));
+    }
+  }, [allSubjects, selSubjectWise]);
+
   const subjectReport = useMemo(() => {
     if (!selSubjectWise) return null;
-    const subject = allSubjects.find(s => s.id === selSubjectWise);
+    const subject = allSubjects.find((s) => String(s.id) === String(selSubjectWise));
     if (!subject) return null;
 
-    const subAssessments = allAssessments.filter(a => a.subjectId === selSubjectWise);
-    const subMarks = marksData.filter(m => m.subjectId === selSubjectWise);
+    const subAssessments = allAssessments.filter(
+      (assessment) => String(assessment.subjectId) === String(selSubjectWise)
+    );
+    const subAssessmentIds = new Set(subAssessments.map((assessment) => String(assessment.id)));
+    const subMarks = marksData.filter((mark) => {
+      if (String(mark.subjectId ?? '') === String(selSubjectWise)) return true;
+      return subAssessmentIds.has(String(mark.assessmentId));
+    });
     
     const studentMap = {};
     for (const m of subMarks) {
-      const a = subAssessments.find(x => x.id === m.assessmentId);
+      const a = subAssessments.find((assessment) => String(assessment.id) === String(m.assessmentId));
       if (!a) continue;
-      if (!studentMap[m.studentId]) studentMap[m.studentId] = { obtained: 0, max: 0, breakdowns: {} };
-      studentMap[m.studentId].obtained += m.totalMarks;
-      studentMap[m.studentId].max += a.maxMarks;
-      studentMap[m.studentId].breakdowns[a.type || m.assessmentType] = (studentMap[m.studentId].breakdowns[a.type || m.assessmentType] || 0) + m.totalMarks;
+      const studentKey = String(m.studentId);
+      if (!studentMap[studentKey]) studentMap[studentKey] = { obtained: 0, max: 0, breakdowns: {} };
+      const marksValue = Number(m.totalMarks ?? m.marksObtained ?? 0);
+      const maxMarksValue = Number(a.maxMarks ?? 0);
+      studentMap[studentKey].obtained += marksValue;
+      studentMap[studentKey].max += maxMarksValue;
+      const breakdownKey = a.type || m.assessmentType || 'Unknown';
+      studentMap[studentKey].breakdowns[breakdownKey] = (studentMap[studentKey].breakdowns[breakdownKey] || 0) + marksValue;
     }
 
     const rows = Object.entries(studentMap).map(([studentId, v]) => {
-      const student = allStudents.find(s => s.id === studentId);
+      const student = allStudents.find((s) => String(s.id) === String(studentId));
       const pct = v.max > 0 ? +((v.obtained / v.max) * 100).toFixed(1) : 0;
       return { student, pct, obtained: v.obtained, max: v.max, breakdowns: v.breakdowns };
     }).sort((a, b) => b.pct - a.pct);
@@ -62,8 +84,8 @@ export default function AdminSubjectTab({ reportData }) {
     // CO Attainment
     const coMap = {};
     for (const m of subMarks) {
-      if (m.assessmentType !== 'MIDSEM') continue;
-      for (const qm of questionMarksData.filter(q => q.markId === m.id)) {
+      if (String(m.assessmentType ?? '').toUpperCase() !== 'MIDSEM') continue;
+      for (const qm of questionMarksData.filter((q) => String(q.markId) === String(m.id))) {
         const key = `CO${qm.coNumber}`;
         if (!coMap[key]) coMap[key] = { obtained: 0, max: 0 };
         coMap[key].obtained += qm.obtainedMarks;
@@ -90,7 +112,11 @@ export default function AdminSubjectTab({ reportData }) {
             <Select value={selSubjectWise} onValueChange={setSelSubjectWise}>
               <SelectTrigger className="rounded-xl h-10 bg-card"><SelectValue placeholder="Choose a subject..." /></SelectTrigger>
               <SelectContent>
-                {allSubjects.map(s => <SelectItem key={s.id} value={s.id}>{s.subjectCode} – {s.subjectName}</SelectItem>)}
+                {allSubjects.map((subject) => (
+                  <SelectItem key={subject.id} value={String(subject.id)}>
+                    {subject.subjectName || `Subject ${subject.id}`}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -180,8 +206,12 @@ export default function AdminSubjectTab({ reportData }) {
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-bold text-muted-foreground">#{i+1}</span>
                           <div>
-                            <p className="font-medium text-sm leading-none mb-1">{r.student.name}</p>
-                            <p className="text-[10px] text-muted-foreground font-mono leading-none">{r.student.regNo}</p>
+                            <p className="font-medium text-sm leading-none mb-1">
+                              {r.student?.name || 'Unknown Student'}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground font-mono leading-none">
+                              {r.student?.regNo || '—'}
+                            </p>
                           </div>
                         </div>
                       </TableCell>
