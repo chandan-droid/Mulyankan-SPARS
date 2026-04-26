@@ -17,7 +17,7 @@ public class SubjectService {
     public SubjectDTO createSubject(SubjectDTO dto) {
         Subject subject = Subject.builder()
                 .subjectCode(dto.getSubjectCode().trim())
-                .subjectCode(dto.getSubjectName().trim())
+                .name(dto.getSubjectName().trim())
                 .build();
 
         return toSubjectDto(subjectRepository.save(subject));
