@@ -1,5 +1,6 @@
 package com.devdroid.spars_server.repository;
 
+import com.devdroid.spars_server.entity.AssessmentType;
 import com.devdroid.spars_server.entity.Mark;
 import java.util.List;
 import java.util.Optional;
@@ -29,4 +30,33 @@ public interface MarkRepository extends JpaRepository<Mark, Long> {
 
     @Query("SELECT DISTINCT m.assessment.id FROM Mark m WHERE m.assessment.id IN :assessmentIds")
     List<Long> findDistinctAssessmentIdsWithRecordedMarks(@Param("assessmentIds") List<Long> assessmentIds);
+
+    // -----------------------------------------------------------------------
+    // Non-CO-mapped mark queries — used by CoAttainmentService to generate
+    // synthetic uniform CO distributions for Quiz, Assignment, Attendance.
+    // The excludedType parameter is always AssessmentType.MIDSEM so that only
+    // assessments without explicit question-level CO mapping are returned.
+    // -----------------------------------------------------------------------
+
+    @Query("SELECT m FROM Mark m WHERE m.student.id = :studentId "
+            + "AND m.assessment.subject.id = :subjectId "
+            + "AND m.assessment.type <> :excludedType")
+    List<Mark> findNonCoMappedByStudentAndSubject(
+            @Param("studentId") Long studentId,
+            @Param("subjectId") Long subjectId,
+            @Param("excludedType") AssessmentType excludedType);
+
+    @Query("SELECT m FROM Mark m WHERE m.student.academicClass.id = :classId "
+            + "AND m.assessment.subject.id = :subjectId "
+            + "AND m.assessment.type <> :excludedType")
+    List<Mark> findNonCoMappedByClassAndSubject(
+            @Param("classId") Long classId,
+            @Param("subjectId") Long subjectId,
+            @Param("excludedType") AssessmentType excludedType);
+
+    @Query("SELECT m FROM Mark m WHERE m.assessment.subject.id = :subjectId "
+            + "AND m.assessment.type <> :excludedType")
+    List<Mark> findNonCoMappedBySubject(
+            @Param("subjectId") Long subjectId,
+            @Param("excludedType") AssessmentType excludedType);
 }
