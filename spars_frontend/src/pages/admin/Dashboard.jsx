@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   LayoutDashboard, Users, BookOpen, UserCog, ClipboardList,
   BarChart2, Blocks, Activity, Award, ArrowUpRight,
-  TrendingUp, ShieldCheck, Settings, Loader2, Target,
+  TrendingUp, ShieldCheck, Settings, Loader2, Target, LayoutGrid,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
@@ -31,6 +31,7 @@ import {
   getAdminTeacherAssignments,
   getAdminMarks,
   getAdminInstituteCoAttainment,
+  getAdminInstituteGradeDistribution,
   getAdminClassCoAttainment,
   getAdminStudentCoAttainment,
 } from '@/lib/adminApi';
@@ -38,8 +39,7 @@ import {
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/admin' },
   { icon: Users,          label: 'Students',   path: '/admin/students' },
-  { icon: Blocks,         label: 'Classes',     path: '/admin/classes' },
-  { icon: BookOpen,       label: 'Subjects',    path: '/admin/subjects' },
+  { icon: LayoutGrid,     label: 'Academic',   path: '/admin/academic' },
   { icon: UserCog,        label: 'Teachers',    path: '/admin/teachers' },
   { icon: ClipboardList,  label: 'Assessments', path: '/admin/assessments' },
   { icon: BarChart2,      label: 'Reports',     path: '/admin/reports' },
@@ -133,9 +133,11 @@ export default function AdminDashboard() {
   );
   const [selectedSubjectId, setSelectedSubjectId] = useState('');
   const [selectedClassId, setSelectedClassId] = useState('ALL');
-  const [selectedStudentId, setSelectedStudentId] = useState('ALL');
   const [coData, setCoData] = useState([]);
   const [loadingCo, setLoadingCo] = useState(false);
+
+  const [gradeDistribution, setGradeDistribution] = useState([]);
+  const [loadingGrade, setLoadingGrade] = useState(true);
 
   const [dashboardData, setDashboardData] = useState(warmDashboardData);
 
@@ -288,22 +290,15 @@ export default function AdminDashboard() {
     setLoadingCo(true);
     
     Promise.all([
-      getAdminInstituteCoAttainment(selectedSubjectId),
       selectedClassId && selectedClassId !== 'ALL' ? getAdminClassCoAttainment(selectedClassId, selectedSubjectId) : Promise.resolve({ coAttainments: [] }),
-      selectedStudentId && selectedStudentId !== 'ALL' ? getAdminStudentCoAttainment(selectedStudentId, selectedSubjectId) : Promise.resolve({ coAttainments: [] })
-    ]).then(([resInst, resClass, resStu]) => {
+    ]).then(([resClass]) => {
       if (cancel) return;
-      const fInst = resInst?.coAttainments || [];
       const fClass = resClass?.coAttainments || [];
-      const fStudent = resStu?.coAttainments || [];
 
-      const allCos = new Set([...fInst, ...fClass, ...fStudent].map(x => x.coNumber));
-
+      const allCos = new Set([...fClass].map(x => x.coNumber));
       const formatted = Array.from(allCos).sort((a,b)=>a-b).map(co => ({
           name: `CO${co}`,
-          Institute: fInst.find(x => x.coNumber === co)?.attainmentLevel || 0,
           Class: fClass.find(x => x.coNumber === co)?.attainmentLevel || 0,
-          Student: fStudent.find(x => x.coNumber === co)?.attainmentLevel || 0,
       }));
       setCoData(formatted);
     })
@@ -314,7 +309,20 @@ export default function AdminDashboard() {
       if (!cancel) setLoadingCo(false);
     });
     return () => { cancel = true; };
-  }, [selectedSubjectId, selectedClassId, selectedStudentId]);
+  }, [selectedSubjectId, selectedClassId]);
+
+  useEffect(() => {
+    let cancel = false;
+    setLoadingGrade(true);
+    getAdminInstituteGradeDistribution()
+      .then((data) => {
+        if (cancel) return;
+        setGradeDistribution(data.map((d) => ({ name: d.grade, value: d.studentCount })));
+      })
+      .catch(() => { if (!cancel) setGradeDistribution([]); })
+      .finally(() => { if (!cancel) setLoadingGrade(false); });
+    return () => { cancel = true; };
+  }, []);
 
   const availableClasses = dashboardData.classes.filter(c => 
     dashboardData.assignments.some(a => String(a.subjectId) === selectedSubjectId && String(a.classId) === String(c.id))
@@ -370,10 +378,9 @@ export default function AdminDashboard() {
 
   const stats = [
     { label: 'Students',    value: totalStudents,    helper: `${branchData.length} branches`, tone: 'stat-gradient-blue',  icon: Users,        path: '/admin/students' },
-    { label: 'Subjects',    value: totalSubjects,    helper: 'In catalogue',                  tone: 'stat-gradient-teal',  icon: BookOpen,     path: '/admin/subjects' },
+    { label: 'Academic',    value: `${totalClasses} Classes`, helper: `${totalSubjects} Subjects`, tone: 'stat-gradient-teal',  icon: LayoutGrid,   path: '/admin/academic' },
     { label: 'Teachers',    value: totalTeachers,    helper: `${assignedTeachers} assigned`,  tone: 'stat-gradient-amber', icon: UserCog,      path: '/admin/teachers' },
     { label: 'Assessments', value: totalAssessments, helper: 'Configured',                   tone: 'stat-gradient-rose',  icon: ClipboardList,path: '/admin/assessments' },
-    { label: 'Classes',     value: totalClasses,     helper: 'Active records',                tone: 'stat-gradient-teal',  icon: Blocks,       path: '/admin/classes' },
     { label: 'Avg. Size',   value: avgClassSize,     helper: maxRoster ? `Max ${maxRoster}` : 'No data', tone: 'stat-gradient-blue', icon: Award, path: null },
   ];
 
@@ -567,85 +574,121 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* ── CO Attainment Row ───────────────────────────────────────── */}
-        <div className="rounded-2xl border border-border/50 bg-card/70 p-5 backdrop-blur-sm shadow-sm mt-6">
-          <div className="mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg stat-gradient-blue shadow">
-                <Target className="h-3.5 w-3.5 text-white" />
+        {/* ── Analytics Row ────────────────────────────────────────── */}
+        <div className="grid gap-6 lg:grid-cols-2 mt-6">
+          {/* CO Attainment Radar */}
+          <div className="rounded-2xl border border-border/50 bg-card/70 p-5 backdrop-blur-sm shadow-sm">
+            <div className="mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg stat-gradient-blue shadow">
+                  <Target className="h-3.5 w-3.5 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm font-heading font-semibold text-foreground">Class CO Attainment Radar</p>
+                  <p className="text-[11px] text-muted-foreground">Class & Subject wise analysis</p>
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-heading font-semibold text-foreground">CO Attainment Radar</p>
-                <p className="text-[11px] text-muted-foreground">Institute, Class, Student Views</p>
+              <div className="flex flex-wrap gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+                <Select value={selectedSubjectId} onValueChange={setSelectedSubjectId}>
+                  <SelectTrigger className="w-32 h-9 text-xs rounded-xl bg-background/50">
+                    <SelectValue placeholder="Subject" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {subjects.map(s => (
+                      <SelectItem key={s.id} value={String(s.id)}>
+                        {s.subjectName || `Subject ${s.id}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select value={selectedClassId} onValueChange={setSelectedClassId}>
+                  <SelectTrigger className="w-32 h-9 text-xs rounded-xl bg-background/50">
+                    <SelectValue placeholder="Class" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All Classes</SelectItem>
+                    {availableClasses.map(c => (
+                      <SelectItem key={c.id} value={String(c.id)}>{formatClassFull(c)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2 w-full sm:w-auto mt-2 sm:mt-0">
-              <Select value={selectedSubjectId} onValueChange={setSelectedSubjectId}>
-                <SelectTrigger className="w-32 h-9 text-xs rounded-xl bg-background/50">
-                  <SelectValue placeholder="Subject" />
-                </SelectTrigger>
-                <SelectContent>
-                  {subjects.map(s => (
-                    <SelectItem key={s.id} value={String(s.id)}>
-                      {s.subjectName || `Subject ${s.id}`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select value={selectedClassId} onValueChange={setSelectedClassId}>
-                <SelectTrigger className="w-32 h-9 text-xs rounded-xl bg-background/50">
-                  <SelectValue placeholder="Class" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All Classes</SelectItem>
-                  {availableClasses.map(c => (
-                    <SelectItem key={c.id} value={String(c.id)}>{formatClassFull(c)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select value={selectedStudentId} onValueChange={setSelectedStudentId}>
-                <SelectTrigger className="w-32 h-9 text-xs rounded-xl bg-background/50">
-                  <SelectValue placeholder="Student" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All Students</SelectItem>
-                  {availableStudents.map(s => (
-                    <SelectItem key={s.id} value={String(s.id)}>{s.name} ({s.regNo})</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            
+            <div className="h-[280px]">
+              {loadingCo ? (
+                <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" /> Syncing Attainment...
+                </div>
+              ) : coData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadarChart cx="50%" cy="50%" outerRadius="75%" data={coData}>
+                    <PolarGrid stroke="hsl(var(--border))" />
+                    <PolarAngleAxis dataKey="name" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} />
+                    <PolarRadiusAxis 
+                      angle={30} 
+                      domain={[0, 'auto']} 
+                      tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} 
+                    />
+                    {selectedClassId !== 'ALL' && <Radar name="Class Attainment" dataKey="Class" stroke="hsl(168,60%,48%)" fill="hsl(168,60%,48%)" fillOpacity={0.4} />}
+                    <Tooltip wrapperStyle={{ borderRadius: '12px' }} />
+                    {selectedClassId !== 'ALL' && <Legend />}
+                  </RadarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                  {selectedClassId === 'ALL' 
+                    ? "Select a class to view CO attainment."
+                    : "No CO Attainment data for selected subject/class."}
+                </div>
+              )}
             </div>
           </div>
-          
-          <div className="h-[280px]">
-            {loadingCo ? (
-              <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin mr-2" /> Syncing Attainment...
+
+          {/* Grade Distribution Bar Chart */}
+          <div className="rounded-2xl border border-border/50 bg-card/70 p-5 backdrop-blur-sm shadow-sm">
+            <div className="mb-5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg stat-gradient-rose shadow">
+                  <Award className="h-3.5 w-3.5 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm font-heading font-semibold text-foreground">Institute Grade Distribution</p>
+                  <p className="text-[11px] text-muted-foreground">Overall performance spread</p>
+                </div>
               </div>
-            ) : coData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <RadarChart cx="50%" cy="50%" outerRadius="75%" data={coData}>
-                  <PolarGrid stroke="hsl(var(--border))" />
-                  <PolarAngleAxis dataKey="name" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} />
-                  <PolarRadiusAxis 
-                    angle={30} 
-                    domain={[0, 'auto']} 
-                    tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} 
-                  />
-                  <Radar name="Institute" dataKey="Institute" stroke="hsl(235,65%,55%)" fill="hsl(235,65%,55%)" fillOpacity={0.3} />
-                  {selectedClassId !== 'ALL' && <Radar name="Class" dataKey="Class" stroke="hsl(168,60%,48%)" fill="hsl(168,60%,48%)" fillOpacity={0.4} />}
-                  {selectedStudentId !== 'ALL' && <Radar name="Student" dataKey="Student" stroke="hsl(35,95%,58%)" fill="hsl(35,95%,58%)" fillOpacity={0.5} />}
-                  <Tooltip wrapperStyle={{ borderRadius: '12px' }} />
-                  <Legend />
-                </RadarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                No CO Attainment data for selected subject.
-              </div>
-            )}
+            </div>
+
+            <div className="h-[280px]">
+              {loadingGrade ? (
+                <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading distribution...
+                </div>
+              ) : gradeDistribution.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={gradeDistribution} barGap={8}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
+                    <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
+                    <Tooltip
+                      cursor={{ fill: 'hsl(var(--muted)/0.4)' }}
+                      contentStyle={TOOLTIP_STYLE}
+                      formatter={(value, name) => [value, `Grade ${name}`]}
+                    />
+                    <Bar dataKey="value" radius={[8, 8, 0, 0]} barSize={40}>
+                      {gradeDistribution.map((_, i) => (
+                        <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                  No marks data yet.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

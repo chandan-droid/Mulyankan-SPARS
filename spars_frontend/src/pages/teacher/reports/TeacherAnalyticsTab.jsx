@@ -11,6 +11,7 @@ import {
   LineChart, Line, Legend,
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
   ReferenceLine,
+  PieChart, Pie,
 } from 'recharts';
 import {
   Loader2, TrendingUp, Trophy, AlertTriangle, Users, BarChart3,
@@ -415,17 +416,25 @@ export default function TeacherAnalyticsTab({
             ) : distribution.length > 0 ? (
               <div className="h-[220px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={distribution} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                    <XAxis dataKey="range" tickLine={false} axisLine={false} fontSize={11} stroke="hsl(var(--muted-foreground))" />
-                    <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={11} stroke="hsl(var(--muted-foreground))" />
-                    <RTC contentStyle={TOOLTIP_STYLE} formatter={(v) => [`${v} students`, 'Count']} />
-                    <Bar dataKey="studentCount" name="Students" radius={[6, 6, 0, 0]} barSize={32}>
+                  <PieChart>
+                    <Pie
+                      data={distribution}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={58}
+                      outerRadius={88}
+                      paddingAngle={3}
+                      dataKey="studentCount"
+                      nameKey="range"
+                      stroke="none"
+                    >
                       {distribution.map((_, i) => (
                         <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                       ))}
-                    </Bar>
-                  </BarChart>
+                    </Pie>
+                    <RTC contentStyle={TOOLTIP_STYLE} formatter={(v, name) => [`${v} students`, name]} />
+                    <Legend verticalAlign="bottom" iconType="circle" wrapperStyle={{ fontSize: 11 }} />
+                  </PieChart>
                 </ResponsiveContainer>
               </div>
             ) : (

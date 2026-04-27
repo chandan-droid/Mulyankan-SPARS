@@ -15,11 +15,45 @@ function PerformBadge({ pct }) {
   return <Badge variant="outline" className={`text-[10px] font-semibold ${color}`}>{pct.toFixed(1)}%</Badge>;
 }
 
-export default function TeacherStudentTab({ reportData, selectedSubject, relevantStudents, subjectInfo, preselectedStudentId = '' }) {
+export default function TeacherStudentTab({ reportData, selectedSubject, relevantStudents, subjectInfo, branch, semester, section, academicYear, preselectedStudentId = '', subjectName, subjectCode }) {
   const allAssessments = reportData?.assessments ?? [];
+  const allAssignments = reportData?.assignments ?? [];
+  const allStudents = reportData?.students ?? [];
+  const allSubjects = reportData?.subjects ?? [];
   const marks = Array.isArray(reportData?.marks) ? reportData.marks : [];
   const questionMarks = Array.isArray(reportData?.questionMarks) ? reportData.questionMarks : [];
   const [selectedStudent, setSelectedStudent] = useState('');
+  const resolvedSubject = useMemo(() => {
+    const subjectFromMaster =
+      allSubjects.find((subject) => String(subject.id) === String(selectedSubject)) ||
+      allSubjects.find((subject) => String(subject.subjectId) === String(selectedSubject));
+
+    if (subjectFromMaster) return subjectFromMaster;
+
+    const assignmentSubject = allAssignments.find(
+      (assignment) => String(assignment.subjectId) === String(selectedSubject)
+    );
+
+    const assessmentSubject = allAssessments.find(
+      (assessment) => String(assessment.subjectId) === String(selectedSubject)
+    );
+
+    return subjectInfo || assignmentSubject || assessmentSubject || null;
+  }, [subjectInfo, allAssignments, allAssessments, allSubjects, selectedSubject]);
+  const resolvedSubjectName = subjectName || 
+    resolvedSubject?.subjectName ||
+    resolvedSubject?.subject_name ||
+    resolvedSubject?.name ||
+    (typeof resolvedSubject?.subject === 'string' ? resolvedSubject.subject : '') ||
+    resolvedSubject?.assessmentInfo?.subjectName ||
+    resolvedSubject?.assessmentInfo?.subject_name ||
+    resolvedSubject?.assessmentInfo?.name ||
+    '';
+  const resolvedSubjectCode = subjectCode ||
+    resolvedSubject?.subjectCode ||
+    resolvedSubject?.subject_code ||
+    resolvedSubject?.code ||
+    '';
   const subjectAssessmentIds = useMemo(() => {
     return new Set(
       allAssessments
@@ -35,6 +69,17 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
     if (!selectedStudent || !selectedSubject) return null;
     const student = relevantStudents.find(s => String(s.id) === String(selectedStudent));
     if (!student) return null;
+
+    const selectedStudentInfo = allStudents.find((item) => String(item.id) === String(selectedStudent)) || student;
+    const matchingAssignment = allAssignments.find(
+      (assignment) =>
+        String(assignment.subjectId) === String(selectedSubject) &&
+        (selectedStudentInfo.classId == null || String(assignment.classId) === String(selectedStudentInfo.classId))
+    );
+    const resolvedBranch = branch || selectedStudentInfo.branch || matchingAssignment?.branch || 'N/A';
+    const resolvedSemester = semester || selectedStudentInfo.semester || matchingAssignment?.semester || 'N/A';
+    const resolvedSection = section || selectedStudentInfo.section || matchingAssignment?.section || 'N/A';
+    const resolvedAcademicYear = academicYear || selectedStudentInfo.academicYear || matchingAssignment?.academicYear || matchingAssignment?.academic_year || 'N/A';
 
     const studentMarks = marks
       .filter(
@@ -52,7 +97,9 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
       const maxValue = Number(m.assessmentInfo?.maxMarks ?? 0);
       const pct = maxValue > 0 ? +((marksValue / maxValue) * 100).toFixed(1) : 0;
       return {
-        subject: subjectInfo?.subjectName || '',
+        subject: resolvedSubjectName,
+        subjectName: resolvedSubjectName,
+        subjectCode: resolvedSubjectCode,
         type: m.assessmentType || m.assessmentInfo?.type,
         marks: marksValue,
         maxMarks: maxValue,
@@ -78,45 +125,70 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
       .filter((m) => subjectAssessmentIds.has(String(m.assessmentId)))
       .forEach((m) => {
         const studentIdKey = String(m.studentId);
-        if(!subjectMarksForOtherStudents[studentIdKey]) {
+        if (!subjectMarksForOtherStudents[studentIdKey]) {
           subjectMarksForOtherStudents[studentIdKey] = { tot: 0, max: 0 };
         }
         const a = assessmentById.get(String(m.assessmentId));
-        if(a) {
+        if (a) {
           subjectMarksForOtherStudents[studentIdKey].tot += Number(m.totalMarks ?? m.marksObtained ?? 0);
           subjectMarksForOtherStudents[studentIdKey].max += Number(a.maxMarks ?? 0);
         }
-    });
-    const allPcts = Object.values(subjectMarksForOtherStudents).map(x => x.max > 0 ? +((x.tot/x.max)*100).toFixed(1) : 0).sort((a,b) => a-b);
+      });
+    const allPcts = Object.values(subjectMarksForOtherStudents).map(x => x.max > 0 ? +((x.tot / x.max) * 100).toFixed(1) : 0).sort((a, b) => a - b);
     let percentile = 100;
     if (allPcts.length > 1) {
       const below = allPcts.filter(p => p < pct).length;
-      percentile = +((below / (allPcts.length - 1))*100).toFixed(1);
+      percentile = +((below / (allPcts.length - 1)) * 100).toFixed(1);
     }
 
-    return { student, rows, totalMarks, maxPossible, pct, grade: getGrade(pct), progressData, percentile };
+    return {
+      student: {
+        ...student,
+        branch: resolvedBranch,
+        semester: resolvedSemester,
+        section: resolvedSection,
+        academicYear: resolvedAcademicYear,
+      },
+      rows,
+      totalMarks,
+      maxPossible,
+      pct,
+      grade: getGrade(pct),
+      progressData,
+      percentile,
+    };
   }, [
     selectedStudent,
     selectedSubject,
     relevantStudents,
     marks,
-    subjectInfo,
     subjectAssessmentIds,
     assessmentById,
+    allAssignments,
+    allStudents,
+    resolvedSubjectName,
+    resolvedSubjectCode,
   ]);
 
   const [coData, setCoData] = useState([]);
   const [loadingCo, setLoadingCo] = useState(false);
 
   useEffect(() => {
-    if (!preselectedStudentId) return;
-    const exists = relevantStudents.some(
-      (student) => String(student.id) === String(preselectedStudentId)
-    );
-    if (exists) {
-      setSelectedStudent(String(preselectedStudentId));
+    if (preselectedStudentId) {
+      const exists = relevantStudents.some(
+        (student) => String(student.id) === String(preselectedStudentId)
+      );
+      if (exists) {
+        setSelectedStudent(String(preselectedStudentId));
+        return;
+      }
     }
-  }, [preselectedStudentId, relevantStudents]);
+    
+    // Auto-select first student if none selected
+    if (!selectedStudent && relevantStudents.length > 0) {
+      setSelectedStudent(String(relevantStudents[0].id));
+    }
+  }, [preselectedStudentId, relevantStudents, selectedStudent]);
 
   useEffect(() => {
     if (!selectedStudent || !selectedSubject) {
@@ -127,20 +199,20 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
     setLoadingCo(true);
     getStudentCoAttainment(selectedStudent, selectedSubject)
       .then(res => {
-         if (cancel) return;
-         const formatted = (res?.coAttainments || []).map(co => ({
-            co: `CO${co.coNumber}`,
-            avg: co.attainmentLevel,
-         }));
-         setCoData(formatted);
+        if (cancel) return;
+        const formatted = (res?.coAttainments || []).map(co => ({
+          co: `CO${co.coNumber}`,
+          avg: co.attainmentLevel,
+        }));
+        setCoData(formatted);
       })
       .catch(() => {
-         if (!cancel) setCoData([]);
+        if (!cancel) setCoData([]);
       })
       .finally(() => {
-         if (!cancel) setLoadingCo(false);
+        if (!cancel) setLoadingCo(false);
       });
-      return () => { cancel = true; };
+    return () => { cancel = true; };
   }, [selectedStudent, selectedSubject]);
 
   return (
@@ -168,7 +240,7 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-primary to-secondary text-xs font-bold text-primary-foreground shadow-md">
-                {report.student.name.split(' ').map(n=>n[0]).join('').slice(0,2)}
+                {report.student.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
               </div>
               <div>
                 <p className="font-heading font-semibold text-foreground">{report.student.name}</p>
@@ -176,7 +248,7 @@ export default function TeacherStudentTab({ reportData, selectedSubject, relevan
               </div>
             </div>
             <div className="flex gap-2">
-              <Button size="sm" className="btn-gradient text-white rounded-xl gap-2 text-xs" onClick={() => exportStudentReportPDF({ studentName: report.student.name, regNo: report.student.regNo, branch: report.student.branch, semester: report.student.semester, section: report.student.section, rows: report.rows, totalMarks: report.totalMarks, maxPossible: report.maxPossible, percentage: report.pct.toString(), grade: report.grade.grade, coData: coData })}><FileText className="h-3.5 w-3.5" /> PDF</Button>
+              <Button size="sm" className="btn-gradient text-white rounded-xl gap-2 text-xs" onClick={() => exportStudentReportPDF({ studentName: report.student.name, regNo: report.student.regNo, branch: report.student.branch, semester: report.student.semester, section: report.student.section, subjectName: report.rows?.[0]?.subjectName || resolvedSubjectName, subjectCode: report.rows?.[0]?.subjectCode || resolvedSubjectCode, rows: report.rows, totalMarks: report.totalMarks, maxPossible: report.maxPossible, percentage: report.pct.toString(), grade: report.grade.grade, coData: coData })}><FileText className="h-3.5 w-3.5" /> PDF</Button>
               <Button size="sm" variant="outline" className="rounded-xl gap-2 text-xs" onClick={() => exportToExcel(report.rows.map(r => ({ Subject: r.subject, Type: r.type, Marks: r.marks, MaxMarks: r.maxMarks, Percentage: r.percentage + '%' })), `${report.student.name}_marks`)}><FileSpreadsheet className="h-3.5 w-3.5" /> Excel</Button>
             </div>
           </div>

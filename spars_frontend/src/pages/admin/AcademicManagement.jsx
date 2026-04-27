@@ -10,6 +10,9 @@ import {
   getAdminClasses,
   getAdminStudents,
   updateAdminClass,
+  createAdminSubject,
+  getAdminSubjects,
+  getCachedAdminSubjects,
 } from '@/lib/adminApi';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -40,6 +43,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Plus,
   Pencil,
@@ -53,6 +57,9 @@ import {
   Download,
   Users2,
   Loader2,
+  BookOpen,
+  Hash,
+  LayoutGrid,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -70,14 +77,8 @@ const emptyClass = {
 const classLabel = (c) =>
   `${c.branch} Sem ${c.semester} Sec ${c.section} • ${c.academic_year}`;
 
-export default function ClassManagement() {
-  const cachedClasses = useMemo(() => getCachedAdminClasses(), []);
-  const cachedStudents = useMemo(() => getCachedAdminStudents(), []);
-  const [classes, setClasses] = useState(cachedClasses);
-  const [students, setStudents] = useState(cachedStudents);
-  const [loading, setLoading] = useState(
-    !(cachedClasses.length > 0 || cachedStudents.length > 0)
-  );
+/* ── Classes Tab Component ────────────────────────────────────────────────── */
+function ClassesTab({ classes, students, loading, refresh }) {
   const [search, setSearch] = useState('');
   const [filterBranch, setFilterBranch] = useState('All');
   const [filterSemester, setFilterSemester] = useState('All');
@@ -91,28 +92,6 @@ export default function ClassManagement() {
   const [saving, setSaving] = useState(false);
   const [openImport, setOpenImport] = useState(false);
   const fileInputRef = useRef(null);
-
-  const refresh = async (silent = false) => {
-    try {
-      if (!silent || !(classes.length > 0 || students.length > 0)) {
-        setLoading(true);
-      }
-      const [classItems, studentItems] = await Promise.all([
-        getAdminClasses(),
-        getAdminStudents(),
-      ]);
-      setClasses(classItems);
-      setStudents(studentItems);
-    } catch (error) {
-      toast.error(error?.message || 'Unable to load classes');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    refresh(true);
-  }, []);
 
   const studentCounts = useMemo(() => {
     const counts = {};
@@ -380,29 +359,13 @@ export default function ClassManagement() {
   };
 
   return (
-    <DashboardLayout navItems={adminNavItems}>
-      <div className="mb-6 flex flex-col xl:flex-row xl:items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl stat-gradient-teal shadow-md">
-              <Blocks className="h-5 w-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-heading font-bold tracking-tight text-foreground">
-                Classes
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                {filteredAndSorted.length} of {classes.length} records
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 bg-white/50 p-2 rounded-2xl border border-white/20 shadow-sm backdrop-blur-md">
-          <div className="relative">
+    <div className="space-y-6">
+      <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-3 bg-white/50 p-2 rounded-2xl border border-white/20 shadow-sm backdrop-blur-md w-full">
+          <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60" />
             <Input
-              className="pl-10 w-full sm:w-64 h-10 rounded-xl bg-card border-border/60"
+              className="pl-10 w-full h-10 rounded-xl bg-card border-border/60"
               placeholder="Search class combination..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -573,7 +536,7 @@ export default function ClassManagement() {
                       key={c.id}
                       className={`group transition-colors ${
                         selectedIds.includes(c.id)
-                          ? 'bg-primary/5 hover:bg-primary/10'
+                           ? 'bg-primary/5 hover:bg-primary/10'
                           : 'hover:bg-muted/30'
                       }`}
                     >
@@ -605,7 +568,7 @@ export default function ClassManagement() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right pr-4">
-                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex justify-end gap-1">
                           <Button
                             variant="ghost"
                             size="icon"
@@ -804,6 +767,287 @@ export default function ClassManagement() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/* ── Subjects Tab Component ────────────────────────────────────────────────── */
+function SubjectsTab({ subjects, setSubjects, loading, refresh }) {
+  const [saving, setSaving] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [form, setForm] = useState({
+    subjectCode: '',
+    subjectName: '',
+  });
+
+  const filteredSubjects = useMemo(() => {
+    const q = search.toLowerCase();
+    return subjects.filter(s => 
+      s.subjectName?.toLowerCase().includes(q) || 
+      s.subjectCode?.toLowerCase().includes(q)
+    );
+  }, [subjects, search]);
+
+  const handleSave = async () => {
+    if (!form.subjectCode.trim() || !form.subjectName.trim()) {
+      toast.error('Both fields are required');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const created = await createAdminSubject(form);
+      setSubjects((prev) => [created, ...prev]);
+      toast.success('Subject added');
+      setOpen(false);
+      setForm({
+        subjectCode: '',
+        subjectName: '',
+      });
+    } catch (error) {
+      toast.error(error?.message || 'Unable to create subject');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="relative w-full sm:w-96">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60" />
+          <Input
+            className="pl-10 h-10 rounded-xl bg-card border-border/60 shadow-sm"
+            placeholder="Search subjects..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <Button
+          onClick={() => setOpen(true)}
+          className="h-10 rounded-xl btn-gradient text-primary-foreground shadow-md w-full sm:w-auto"
+        >
+          <Plus className="h-4 w-4 mr-1.5" /> Add Subject
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="py-16 flex items-center justify-center text-muted-foreground gap-2">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading subjects...
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {filteredSubjects.map((s, i) => (
+            <Card
+              key={s.id}
+              className="glass-card group hover:shadow-xl hover:-translate-y-1 transition-all duration-300 animate-fade-in-up border-primary/5"
+              style={{
+                animationDelay: `${i * 0.05}s`,
+                animationFillMode: 'both',
+              }}
+            >
+              <CardContent className="p-5">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary shrink-0 transition-colors group-hover:bg-primary group-hover:text-white">
+                    <Hash className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-bold text-foreground text-base truncate leading-tight mb-1">
+                      {s.subjectName}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <code className="text-[10px] bg-muted/80 px-2 py-0.5 rounded-md font-mono text-muted-foreground border border-border/40">
+                        {s.subjectCode}
+                      </code>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+          {filteredSubjects.length === 0 && (
+             <div className="col-span-full text-center py-16 bg-muted/20 rounded-3xl border-2 border-dashed border-border/40">
+              <BookOpen className="h-12 w-12 text-muted-foreground/20 mx-auto mb-3" />
+              <p className="text-sm font-medium text-muted-foreground">
+                No subjects found
+              </p>
+              <p className="text-xs text-muted-foreground/60 mt-1">
+                Try a different search term or add a new subject
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-heading font-bold text-xl">
+              Add New Subject
+            </DialogTitle>
+            <DialogDescription>
+              Enter the subject code and name to register it in the system.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Subject Code
+              </Label>
+              <Input
+                value={form.subjectCode}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    subjectCode: e.target.value,
+                  })
+                }
+                placeholder="e.g. CS301"
+                className="rounded-xl h-12 border-border/60"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Subject Name
+              </Label>
+              <Input
+                value={form.subjectName}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    subjectName: e.target.value,
+                  })
+                }
+                placeholder="e.g. Data Structures & Algorithms"
+                className="rounded-xl h-12 border-border/60"
+              />
+            </div>
+          </div>
+          <DialogFooter className="mt-6">
+            <Button
+              variant="outline"
+              onClick={() => setOpen(false)}
+              className="rounded-xl h-11"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+              className="rounded-xl h-11 btn-gradient text-primary-foreground px-8"
+            >
+              {saving ? 'Saving...' : 'Add Subject'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+/* ── Main Page Component ──────────────────────────────────────────────────── */
+export default function AcademicManagement() {
+  const [classes, setClasses] = useState(() => getCachedAdminClasses());
+  const [students, setStudents] = useState(() => getCachedAdminStudents());
+  const [subjects, setSubjects] = useState(() => getCachedAdminSubjects());
+  
+  const [loading, setLoading] = useState(
+    !(classes.length > 0 || students.length > 0 || subjects.length > 0)
+  );
+
+  const refresh = async (silent = false) => {
+    try {
+      if (!silent || !(classes.length > 0 || students.length > 0 || subjects.length > 0)) {
+        setLoading(true);
+      }
+      const [classItems, studentItems, subjectItems] = await Promise.all([
+        getAdminClasses(),
+        getAdminStudents(),
+        getAdminSubjects(),
+      ]);
+      setClasses(classItems);
+      setStudents(studentItems);
+      setSubjects(subjectItems);
+    } catch (error) {
+      toast.error(error?.message || 'Unable to load academic data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refresh(true);
+  }, []);
+
+  return (
+    <DashboardLayout navItems={adminNavItems}>
+      <div className="max-w-[1600px] mx-auto space-y-8">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-inner border border-primary/10">
+              <LayoutGrid className="h-7 w-7" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-heading font-bold tracking-tight text-foreground">
+                Academic Management
+              </h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                Configure classes, subjects, and curriculum parameters
+              </p>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-2 bg-muted/30 p-1 rounded-2xl border border-border/50">
+            <div className="px-4 py-2 text-center">
+              <p className="text-xl font-bold text-foreground leading-none">{classes.length}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mt-1">Classes</p>
+            </div>
+            <div className="w-px h-8 bg-border/60" />
+            <div className="px-4 py-2 text-center">
+              <p className="text-xl font-bold text-foreground leading-none">{subjects.length}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mt-1">Subjects</p>
+            </div>
+          </div>
+        </div>
+
+        <Tabs defaultValue="classes" className="w-full">
+          <TabsList className="bg-muted/50 p-1.5 rounded-2xl h-auto mb-8 border border-border/50 backdrop-blur-sm">
+            <TabsTrigger 
+              value="classes" 
+              className="rounded-xl px-8 py-3 text-sm font-semibold data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-lg transition-all"
+            >
+              <Blocks className="h-4 w-4 mr-2" />
+              Classes
+            </TabsTrigger>
+            <TabsTrigger 
+              value="subjects" 
+              className="rounded-xl px-8 py-3 text-sm font-semibold data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-lg transition-all"
+            >
+              <BookOpen className="h-4 w-4 mr-2" />
+              Subjects
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="classes" className="mt-0 focus-visible:outline-none">
+            <ClassesTab 
+              classes={classes} 
+              students={students} 
+              loading={loading} 
+              refresh={refresh} 
+            />
+          </TabsContent>
+
+          <TabsContent value="subjects" className="mt-0 focus-visible:outline-none">
+            <SubjectsTab 
+              subjects={subjects} 
+              setSubjects={setSubjects} 
+              loading={loading} 
+              refresh={refresh} 
+            />
+          </TabsContent>
+        </Tabs>
+      </div>
     </DashboardLayout>
   );
 }

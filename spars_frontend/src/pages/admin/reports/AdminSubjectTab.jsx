@@ -4,8 +4,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RTC, ResponsiveContainer, CartesianGrid, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
-import { BookOpen, Users, TrendingUp, Trophy, Target } from 'lucide-react';
+import { BookOpen, Users, TrendingUp, Trophy, Target, Loader2 } from 'lucide-react';
 import { getPerformanceColor, getGrade } from '@/lib/reportUtils';
+import { getAdminInstituteCoAttainment } from '@/lib/adminApi';
 
 function PerformBadge({ pct }) {
   const color = pct >= 75 ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : pct >= 50 ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-red-100 text-red-700 border-red-200';
@@ -21,6 +22,8 @@ export default function AdminSubjectTab({ reportData }) {
     ? reportData.questionMarks
     : [];
   const [selSubjectWise, setSelSubjectWise] = useState('');
+  const [coDataApi, setCoDataApi] = useState([]);
+  const [loadingCoApi, setLoadingCoApi] = useState(false);
 
   useEffect(() => {
     if (!allSubjects.length) {
@@ -33,6 +36,24 @@ export default function AdminSubjectTab({ reportData }) {
       setSelSubjectWise(String(allSubjects[0].id));
     }
   }, [allSubjects, selSubjectWise]);
+
+  useEffect(() => {
+    if (!selSubjectWise) return;
+    let cancel = false;
+    setLoadingCoApi(true);
+    getAdminInstituteCoAttainment(selSubjectWise)
+      .then((res) => {
+        if (cancel) return;
+        const formatted = (res?.coAttainments || []).map((co) => ({
+          co: `CO${co.coNumber}`,
+          avg: co.attainmentLevel,
+        }));
+        setCoDataApi(formatted);
+      })
+      .catch(() => { if (!cancel) setCoDataApi([]); })
+      .finally(() => { if (!cancel) setLoadingCoApi(false); });
+    return () => { cancel = true; };
+  }, [selSubjectWise]);
 
   const subjectReport = useMemo(() => {
     if (!selSubjectWise) return null;
@@ -100,7 +121,21 @@ export default function AdminSubjectTab({ reportData }) {
     // Get unique assessment types for columns
     const types = [...new Set(subAssessments.map(a => a.type || 'Unknown'))];
 
-    return { subject, rows, avgPct, distData, topPerformers: rows.slice(0, 5), coData, types };
+    // Assessment type averages for this subject
+    const typeAverages = types.map(t => {
+      const typeMarks = subMarks.filter(m => {
+        const a = subAssessments.find(as => String(as.id) === String(m.assessmentId));
+        return (a?.type || m.assessmentType) === t;
+      });
+      const totalObtained = typeMarks.reduce((s, m) => s + Number(m.totalMarks ?? m.marksObtained ?? 0), 0);
+      const totalMax = typeMarks.reduce((s, m) => {
+        const a = subAssessments.find(as => String(as.id) === String(m.assessmentId));
+        return s + Number(a?.maxMarks ?? 0);
+      }, 0);
+      return { name: t, avg: totalMax > 0 ? (totalObtained / totalMax) * 100 : 0 };
+    });
+
+    return { subject, rows, avgPct, distData, topPerformers: rows.slice(0, 5), coData, types, typeAverages };
   }, [selSubjectWise, allSubjects, allAssessments, marksData, questionMarksData, allStudents]);
 
   return (
@@ -150,37 +185,81 @@ export default function AdminSubjectTab({ reportData }) {
             <Card className="glass-card">
               <CardHeader><CardTitle className="text-sm font-heading font-semibold">Subject CO Attainment</CardTitle></CardHeader>
               <CardContent>
-                {subjectReport.coData.length > 0 ? (
+                {loadingCoApi ? (
+                  <div className="flex h-[240px] items-center justify-center text-xs text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" /> Syncing attainment...
+                  </div>
+                ) : coDataApi.length > 0 ? (
                   <ResponsiveContainer width="100%" height={240}>
-                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={subjectReport.coData}>
-                      <PolarGrid stroke="hsl(225,14%,90%)" />
-                      <PolarAngleAxis dataKey="co" tick={{ fill: 'hsl(224,12%,48%)', fontSize: 11 }} />
-                      <PolarRadiusAxis angle={30} domain={[0, 100]} />
-                      <Radar name="Attainment %" dataKey="avg" stroke="hsl(168,60%,48%)" fill="hsl(168,60%,48%)" fillOpacity={0.4} />
-                      <RTC wrapperStyle={{ borderRadius: '12px' }} />
+                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={coDataApi}>
+                      <PolarGrid stroke="hsl(var(--border))" />
+                      <PolarAngleAxis dataKey="co" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} />
+                      <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 10 }} />
+                      {(() => {
+                        const avg = coDataApi.length > 0 ? coDataApi.reduce((s, c) => s + c.avg, 0) / coDataApi.length : 0;
+                        const color = getPerformanceColor(avg);
+                        return <Radar name="Attainment %" dataKey="avg" stroke={color} fill={color} fillOpacity={0.4} />;
+                      })()}
+                      <RTC 
+                        contentStyle={{ borderRadius: '12px', backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }} 
+                        itemStyle={{ fontSize: '12px' }}
+                      />
                     </RadarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="text-center py-12 text-muted-foreground text-sm">No MidSem data to calculate CO attainment</div>
+                  <div className="text-center py-12 text-muted-foreground text-sm">No CO attainment data available for this subject</div>
                 )}
               </CardContent>
             </Card>
 
             <Card className="glass-card">
+              <CardHeader><CardTitle className="text-sm font-heading font-semibold">Avg % by Assessment Type</CardTitle></CardHeader>
+              <CardContent>
+                {subjectReport.typeAverages.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={subjectReport.typeAverages} barGap={4}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(225,14%,90%)" vertical={false} />
+                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
+                      <YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
+                      <RTC contentStyle={{ borderRadius: '12px', backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }} formatter={(v) => [`${v.toFixed(1)}%`, 'Avg']} />
+                      <Bar 
+                        dataKey="avg" 
+                        radius={[6, 6, 0, 0]} 
+                        barSize={32}
+                        label={{ position: 'top', fill: 'hsl(var(--muted-foreground))', fontSize: 10, formatter: (v) => `${v.toFixed(0)}%` }}
+                      >
+                        {subjectReport.typeAverages.map((entry, i) => (
+                          <Cell key={i} fill={getPerformanceColor(entry.avg)} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-center py-12 text-muted-foreground text-sm">No assessment data</div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="glass-card lg:col-span-2">
               <CardHeader><CardTitle className="text-sm font-heading font-semibold">Score Distribution</CardTitle></CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={subjectReport.distData} barGap={4}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(225,14%,90%)" vertical={false} />
-                    <XAxis dataKey="range" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
-                    <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
-                    <RTC contentStyle={{ borderRadius: '12px' }} />
-                    <Bar dataKey="count" name="Students" radius={[6,6,0,0]}>
-                      {subjectReport.distData.map((e, i) => (
-                        <Cell key={i} fill={['hsl(168,60%,48%)', 'hsl(168,60%,48%)', 'hsl(35,95%,58%)', 'hsl(35,95%,58%)', 'hsl(0,72%,55%)'][i]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
+                    <BarChart data={subjectReport.distData} barGap={4}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                      <XAxis dataKey="range" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
+                      <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
+                      <RTC contentStyle={{ borderRadius: '12px', backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }} />
+                      <Bar 
+                        dataKey="count" 
+                        name="Students" 
+                        radius={[6,6,0,0]}
+                        label={{ position: 'top', fill: 'hsl(var(--muted-foreground))', fontSize: 10 }}
+                      >
+                        {subjectReport.distData.map((e, i) => (
+                          <Cell key={i} fill={['#16a34a', '#22c55e', '#eab308', '#f97316', '#ef4444'][i]} />
+                        ))}
+                      </Bar>
+                    </BarChart>
                 </ResponsiveContainer>
               </CardContent>
             </Card>

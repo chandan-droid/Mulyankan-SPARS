@@ -44,6 +44,7 @@ export default function AdminClassTab({ reportData, onNavigateToStudent }) {
   const marksData = Array.isArray(reportData?.marks) ? reportData.marks : [];
 
   const [selectedClassId, setSelectedClassId] = useState('');
+  const [selectedSubjectId, setSelectedSubjectId] = useState('');
   const [coData, setCoData] = useState([]);
   const [loadingCo, setLoadingCo] = useState(false);
 
@@ -66,6 +67,46 @@ export default function AdminClassTab({ reportData, onNavigateToStudent }) {
     }).sort((a, b) => a.label.localeCompare(b.label));
   }, [allStudents]);
 
+  // Default select first class
+  useEffect(() => {
+    if (!selectedClassId && availableClasses.length > 0) {
+      setSelectedClassId(availableClasses[0].id);
+    }
+  }, [availableClasses, selectedClassId]);
+
+  const availableSubjects = useMemo(() => {
+    if (!selectedClassId) return [];
+    const selectedCls = availableClasses.find(c => c.id === selectedClassId);
+    if (!selectedCls) return [];
+
+    // Find classId from a student in the class
+    const sampleStudent = allStudents.find(s =>
+      s.branch === selectedCls.branch && s.semester === selectedCls.semester && s.section === selectedCls.section
+    );
+    const classId = sampleStudent?.classId;
+    if (!classId) return [];
+
+    const subjectIds = [...new Set(
+      allAssessments
+        .filter(a => String(a.classId) === String(classId))
+        .map(a => a.subjectId)
+        .filter(Boolean)
+    )];
+
+    return allSubjects
+      .filter(s => subjectIds.includes(s.id))
+      .sort((a, b) => (a.subjectName || '').localeCompare(b.subjectName || ''));
+  }, [selectedClassId, availableClasses, allStudents, allAssessments, allSubjects]);
+
+  // Reset subject filter when class changes (or auto-select first)
+  useEffect(() => {
+    if (availableSubjects.length > 0) {
+      setSelectedSubjectId(String(availableSubjects[0].id));
+    } else {
+      setSelectedSubjectId('');
+    }
+  }, [selectedClassId, availableSubjects]);
+
   const classReport = useMemo(() => {
     if (!selectedClassId) return null;
     const selectedCls = availableClasses.find(c => c.id === selectedClassId);
@@ -74,7 +115,16 @@ export default function AdminClassTab({ reportData, onNavigateToStudent }) {
     const classStudents = allStudents.filter(s => s.branch === selectedCls.branch && s.semester === selectedCls.semester && s.section === selectedCls.section);
     
     const rows = classStudents.map(student => {
-      const marks = marksData.filter(m => String(m.studentId) === String(student.id));
+      const marks = marksData.filter(m => {
+        const isStudent = String(m.studentId) === String(student.id);
+        if (!isStudent) return false;
+        if (!selectedSubjectId || selectedSubjectId === 'ALL') return true;
+        
+        // Match by mark.subjectId or by linking via assessment
+        if (m.subjectId && String(m.subjectId) === String(selectedSubjectId)) return true;
+        const a = allAssessments.find(x => String(x.id) === String(m.assessmentId));
+        return a && String(a.subjectId) === String(selectedSubjectId);
+      });
       let tot = 0, max = 0;
       let midsem = 0, quiz = 0, assignment = 0, attend = 0;
       let maxMidsem = 0, maxQuiz = 0, maxAssignment = 0, maxAttend = 0;
@@ -116,7 +166,7 @@ export default function AdminClassTab({ reportData, onNavigateToStudent }) {
       rows, avgPct, passCount, failCount: rows.length - passCount,
       cls: selectedCls,
     };
-  }, [selectedClassId, availableClasses, allStudents, marksData, allAssessments]);
+  }, [selectedClassId, selectedSubjectId, availableClasses, allStudents, marksData, allAssessments]);
 
   // Fetch CO data for the selected class (first subject available in class)
   useEffect(() => {
@@ -130,7 +180,7 @@ export default function AdminClassTab({ reportData, onNavigateToStudent }) {
     );
     const classId = sampleStudent?.classId;
     
-    // Find first subject relevant to this class
+    // Find subjects relevant to this class
     const classAssessmentSubjectIds = [...new Set(
       allAssessments
         .filter(a => String(a.classId) === String(classId))
@@ -139,7 +189,7 @@ export default function AdminClassTab({ reportData, onNavigateToStudent }) {
     )];
     if (!classId || classAssessmentSubjectIds.length === 0) { setCoData([]); return; }
 
-    const subjectId = classAssessmentSubjectIds[0];
+    const subjectId = (selectedSubjectId && selectedSubjectId !== 'ALL') ? selectedSubjectId : classAssessmentSubjectIds[0];
     let cancel = false;
     setLoadingCo(true);
     getAdminClassCoAttainment(classId, subjectId)
@@ -148,14 +198,14 @@ export default function AdminClassTab({ reportData, onNavigateToStudent }) {
         const formatted = (res?.coAttainments || []).map(co => ({
           co: `CO${co.coNumber}`,
           avg: Math.round(Number(co.attainmentLevel) * 10) / 10,
-          status: Number(co.attainmentLevel) >= 60 ? 'Attained' : 'Action Required',
+          status: Number(co.attainmentLevel) >= 70 ? 'Excellent' : Number(co.attainmentLevel) >= 65 ? 'Good' : Number(co.attainmentLevel) >= 60 ? 'Moderate' : 'Critical',
         }));
         setCoData(formatted);
       })
       .catch(() => { if (!cancel) setCoData([]); })
       .finally(() => { if (!cancel) setLoadingCo(false); });
     return () => { cancel = true; };
-  }, [selectedClassId, availableClasses, classReport, allStudents, allAssessments]);
+  }, [selectedClassId, selectedSubjectId, availableClasses, classReport, allStudents, allAssessments]);
 
   const handleStudentClick = (student) => {
     if (typeof onNavigateToStudent === 'function') {
@@ -167,14 +217,36 @@ export default function AdminClassTab({ reportData, onNavigateToStudent }) {
     <div className="space-y-6 animate-fade-in-up">
       <Card className="glass-card">
         <CardContent className="p-6">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60 mb-4">Select Class</p>
-          <div className="max-w-md space-y-2">
-            <Select value={selectedClassId} onValueChange={setSelectedClassId}>
-              <SelectTrigger className="rounded-xl h-10 bg-card"><SelectValue placeholder="Choose a class..." /></SelectTrigger>
-              <SelectContent>
-                {availableClasses.map(c => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
+          <div className="grid gap-6 sm:grid-cols-2 max-w-2xl">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60 mb-3">Select Class</p>
+              <Select value={selectedClassId} onValueChange={setSelectedClassId}>
+                <SelectTrigger className="rounded-xl h-10 bg-card"><SelectValue placeholder="Choose a class..." /></SelectTrigger>
+                <SelectContent>
+                  {availableClasses.map(c => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            {selectedClassId && (
+              <div className="animate-in fade-in slide-in-from-left-2 duration-300">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60 mb-3">Filter by Subject</p>
+                <Select value={selectedSubjectId} onValueChange={setSelectedSubjectId}>
+                  <SelectTrigger className="rounded-xl h-10 bg-card">
+                    <div className="flex items-center gap-2">
+                      <BookOpen className="h-4 w-4 text-primary/50" />
+                      <SelectValue placeholder="Select Subject" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableSubjects.map(s => (
+                      <SelectItem key={s.id} value={String(s.id)}>
+                        {s.subjectCode} - {s.subjectName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -226,22 +298,46 @@ export default function AdminClassTab({ reportData, onNavigateToStudent }) {
                       <p className="text-xs font-bold uppercase tracking-wider text-indigo-500 mb-1">Performance</p>
                       <p className="text-lg font-heading font-bold text-foreground">CO-wise Attainment</p>
                     </div>
-                    <div className="rounded-2xl bg-white dark:bg-slate-900 shadow-sm border border-border/50 px-3 py-1.5 flex items-center gap-2">
-                      <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                      <span className="text-xs font-bold text-foreground">
-                        {coData.filter(co => co.avg >= 60).length}/{coData.length} Targets Met
-                      </span>
+                    <div className="flex flex-wrap gap-2">
+                      <div className="rounded-xl bg-white dark:bg-slate-900 shadow-sm border border-border/50 px-3 py-1.5 flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full bg-red-500" />
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase">0-60:</span>
+                        <span className="text-xs font-bold text-foreground">{coData.filter(co => co.avg < 60).length}</span>
+                      </div>
+                      <div className="rounded-xl bg-white dark:bg-slate-900 shadow-sm border border-border/50 px-3 py-1.5 flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full bg-amber-500" />
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase">60-65:</span>
+                        <span className="text-xs font-bold text-foreground">{coData.filter(co => co.avg >= 60 && co.avg < 65).length}</span>
+                      </div>
+                      <div className="rounded-xl bg-white dark:bg-slate-900 shadow-sm border border-border/50 px-3 py-1.5 flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full bg-lime-500" />
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase">65-70:</span>
+                        <span className="text-xs font-bold text-foreground">{coData.filter(co => co.avg >= 65 && co.avg < 70).length}</span>
+                      </div>
+                      <div className="rounded-xl bg-white dark:bg-slate-900 shadow-sm border border-border/50 px-3 py-1.5 flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full bg-emerald-500" />
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase">70+:</span>
+                        <span className="text-xs font-bold text-foreground">{coData.filter(co => co.avg >= 70).length}</span>
+                      </div>
                     </div>
                   </div>
                   <div className="relative z-10 w-full">
                     <ResponsiveContainer width="100%" height={240}>
                       <BarChart data={coData} barGap={8} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
                         <defs>
-                          <linearGradient id="adminCoAttained" x1="0" y1="0" x2="0" y2="1">
+                          <linearGradient id="adminCoExcellent" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor="#10b981" stopOpacity={0.9}/>
                             <stop offset="95%" stopColor="#10b981" stopOpacity={0.2}/>
                           </linearGradient>
-                          <linearGradient id="adminCoWatch" x1="0" y1="0" x2="0" y2="1">
+                          <linearGradient id="adminCoGood" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#84cc16" stopOpacity={0.9}/>
+                            <stop offset="95%" stopColor="#84cc16" stopOpacity={0.2}/>
+                          </linearGradient>
+                          <linearGradient id="adminCoMid" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.9}/>
+                            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.2}/>
+                          </linearGradient>
+                          <linearGradient id="adminCoLow" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.9}/>
                             <stop offset="95%" stopColor="#f43f5e" stopOpacity={0.2}/>
                           </linearGradient>
@@ -250,10 +346,12 @@ export default function AdminClassTab({ reportData, onNavigateToStudent }) {
                         <XAxis dataKey="co" tickLine={false} axisLine={false} tick={{ fontSize: 11, fontWeight: 600 }} tickMargin={12} opacity={0.6} />
                         <YAxis domain={[0, 100]} tickLine={false} axisLine={false} tick={{ fontSize: 11 }} opacity={0.6} />
                         <RTC content={<CoTooltip />} cursor={{ fill: 'rgba(99, 102, 241, 0.04)', rx: 8 }} />
-                        <ReferenceLine y={60} stroke="#10b981" strokeOpacity={0.4} strokeDasharray="4 4" label={{ position: 'top', value: 'Target 60%', fill: '#10b981', fontSize: 10, fontWeight: 700 }} />
+                        <ReferenceLine y={60} stroke="#f59e0b" strokeOpacity={0.4} strokeDasharray="4 4" label={{ position: 'top', value: 'Min 60%', fill: '#f59e0b', fontSize: 8, fontWeight: 700 }} />
+                        <ReferenceLine y={65} stroke="#84cc16" strokeOpacity={0.4} strokeDasharray="4 4" label={{ position: 'top', value: 'Good 65%', fill: '#84cc16', fontSize: 8, fontWeight: 700 }} />
+                        <ReferenceLine y={70} stroke="#10b981" strokeOpacity={0.4} strokeDasharray="4 4" label={{ position: 'top', value: 'Target 70%', fill: '#10b981', fontSize: 8, fontWeight: 700 }} />
                         <Bar dataKey="avg" name="Attainment %" radius={[8, 8, 0, 0]} isAnimationActive animationDuration={1200} animationEasing="ease-out">
                           {coData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.avg >= 60 ? 'url(#adminCoAttained)' : 'url(#adminCoWatch)'} />
+                            <Cell key={`cell-${index}`} fill={entry.avg >= 70 ? 'url(#adminCoExcellent)' : entry.avg >= 65 ? 'url(#adminCoGood)' : entry.avg >= 60 ? 'url(#adminCoMid)' : 'url(#adminCoLow)'} />
                           ))}
                         </Bar>
                       </BarChart>
@@ -275,7 +373,17 @@ export default function AdminClassTab({ reportData, onNavigateToStudent }) {
           <div className="flex gap-3">
             <Button size="sm" className="btn-gradient text-white rounded-xl gap-2 text-xs" onClick={() => {
               const cls = availableClasses.find(c => c.id === selectedClassId);
-              exportClassReportPDF(`${cls?.branch} Sem${cls?.semester} Sec${cls?.section}`, classReport.rows, classReport.avgPct.toFixed(1), classReport.passCount, classReport.failCount);
+              const subjectObj = availableSubjects.find(s => String(s.id) === String(selectedSubjectId));
+              exportClassReportPDF(
+                `${cls?.branch} Sem${cls?.semester} Sec${cls?.section}`, 
+                classReport.rows, 
+                classReport.avgPct.toFixed(1), 
+                classReport.passCount, 
+                classReport.failCount,
+                coData,
+                subjectObj?.subjectName,
+                subjectObj?.subjectCode
+              );
             }}><FileText className="h-3.5 w-3.5" /> Export PDF</Button>
             <Button size="sm" variant="outline" className="rounded-xl gap-2 text-xs" onClick={() => {
               const cls = availableClasses.find(c => c.id === selectedClassId);

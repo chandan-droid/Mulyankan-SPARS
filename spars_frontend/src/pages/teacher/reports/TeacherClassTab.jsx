@@ -19,7 +19,11 @@ function PerformBadge({ pct }) {
 const CustomTooltip = ({ active, payload }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
+    const isExcellent = data.avg >= 70;
+    const isGood = data.avg >= 65 && data.avg < 70;
+    const isModerate = data.avg >= 60 && data.avg < 65;
     const isAttained = data.avg >= 60;
+    const status = isExcellent ? 'Excellent' : isGood ? 'Good' : isModerate ? 'Moderate' : 'Critical';
     return (
       <div className="bg-white/95 dark:bg-slate-900/95 border border-border/50 p-3 rounded-xl shadow-xl backdrop-blur-md min-w-[180px]">
         <p className="font-semibold text-sm mb-2">{data.co}</p>
@@ -31,7 +35,7 @@ const CustomTooltip = ({ active, payload }) => {
           <div className="flex items-center justify-between gap-4 text-xs">
             <span className="text-muted-foreground">Status:</span>
             <span className={`font-bold ${isAttained ? 'text-emerald-500' : 'text-red-500'}`}>
-              {data.status}
+              {status}
             </span>
           </div>
         </div>
@@ -47,11 +51,14 @@ const CustomTooltip = ({ active, payload }) => {
   return null;
 };
 
-export default function TeacherClassTab({ reportData, selectedSubject, relevantStudents, branch, semester, section, studentCount, academicYear, onOpenStudentReport }) {
+export default function TeacherClassTab({ reportData, selectedSubject, subjectName, subjectCode, relevantStudents, branch, semester, section, studentCount, academicYear, onOpenStudentReport }) {
   const allAssessments = reportData?.assessments ?? [];
   const marksData = Array.isArray(reportData?.marks) ? reportData.marks : [];
   const [coData, setCoData] = useState([]);
   const [loadingCo, setLoadingCo] = useState(false);
+
+  const resolvedSubjectName = subjectName || '';
+  const resolvedSubjectCode = subjectCode || '';
 
   const subjectAssessmentIds = useMemo(() => {
     const relevantClassIds = new Set(
@@ -85,7 +92,7 @@ export default function TeacherClassTab({ reportData, selectedSubject, relevantS
     if (!selectedSubject) return { rows: [], avg: 0 };
 
     const assessmentById = new Map(allAssessments.map((a) => [String(a.id), a]));
-    
+
     const rows = relevantStudents.map(student => {
       const marks = marksData.filter(
         (m) =>
@@ -120,7 +127,7 @@ export default function TeacherClassTab({ reportData, selectedSubject, relevantS
         tot += marksValue;
         max += maxMarksValue;
 
-        switch(assessmentType) {
+        switch (assessmentType) {
           case 'MIDSEM': midsem += marksValue; maxMidsem += maxMarksValue; hasMidsem = true; break;
           case 'QUIZ': quiz += marksValue; maxQuiz += maxMarksValue; hasQuiz = true; break;
           case 'ASSIGNMENT': assignment += marksValue; maxAssignment += maxMarksValue; hasAssignment = true; break;
@@ -234,40 +241,66 @@ export default function TeacherClassTab({ reportData, selectedSubject, relevantS
             <div className="relative rounded-3xl border border-indigo-500/10 bg-gradient-to-br from-indigo-500/[0.03] via-transparent to-emerald-500/[0.03] p-5 shadow-sm overflow-hidden">
               <div className="absolute top-0 right-0 -mr-20 -mt-20 h-64 w-64 rounded-full bg-indigo-500/5 blur-3xl pointer-events-none" />
               <div className="absolute bottom-0 left-0 -ml-20 -mb-20 h-64 w-64 rounded-full bg-emerald-500/5 blur-3xl pointer-events-none" />
-              
-              <div className="relative z-10 mb-6 flex items-center justify-between gap-3">
+
+              <div className="relative z-10 mb-4 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-indigo-500 mb-1">Performance</p>
                   <p className="text-lg font-heading font-bold text-foreground">CO-wise Attainment</p>
                 </div>
-                <div className="rounded-2xl bg-white dark:bg-slate-900 shadow-sm border border-border/50 px-3 py-1.5 flex items-center gap-2">
-                  <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-xs font-bold text-foreground">
-                    {coData.filter((co) => co.avg >= 60).length}/{coData.length} Targets Met
-                  </span>
+                <div className="flex flex-wrap gap-2">
+                  <div className="rounded-xl bg-white dark:bg-slate-900 shadow-sm border border-border/50 px-3 py-1.5 flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-red-500" />
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase">0-60:</span>
+                    <span className="text-xs font-bold text-foreground">{coData.filter((co) => co.avg < 60).length}</span>
+                  </div>
+                  <div className="rounded-xl bg-white dark:bg-slate-900 shadow-sm border border-border/50 px-3 py-1.5 flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-amber-500" />
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase">60-65:</span>
+                    <span className="text-xs font-bold text-foreground">{coData.filter((co) => co.avg >= 60 && co.avg < 65).length}</span>
+                  </div>
+                  <div className="rounded-xl bg-white dark:bg-slate-900 shadow-sm border border-border/50 px-3 py-1.5 flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-lime-500" />
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase">65-70:</span>
+                    <span className="text-xs font-bold text-foreground">{coData.filter((co) => co.avg >= 65 && co.avg < 70).length}</span>
+                  </div>
+                  <div className="rounded-xl bg-white dark:bg-slate-900 shadow-sm border border-border/50 px-3 py-1.5 flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-emerald-500" />
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase">70+:</span>
+                    <span className="text-xs font-bold text-foreground">{coData.filter((co) => co.avg >= 70).length}</span>
+                  </div>
                 </div>
               </div>
               <div className="relative z-10 w-full mt-2">
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={coData} barGap={8} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
                     <defs>
-                      <linearGradient id="colorAttained" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.9}/>
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0.2}/>
+                      <linearGradient id="teacherCoExcellent" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.9} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0.2} />
                       </linearGradient>
-                      <linearGradient id="colorWatch" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.9}/>
-                        <stop offset="95%" stopColor="#f43f5e" stopOpacity={0.2}/>
+                      <linearGradient id="teacherCoGood" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#84cc16" stopOpacity={0.9} />
+                        <stop offset="95%" stopColor="#84cc16" stopOpacity={0.2} />
+                      </linearGradient>
+                      <linearGradient id="teacherCoMid" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.9} />
+                        <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.2} />
+                      </linearGradient>
+                      <linearGradient id="teacherCoLow" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.9} />
+                        <stop offset="95%" stopColor="#f43f5e" stopOpacity={0.2} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.06} vertical={false} />
                     <XAxis dataKey="co" tickLine={false} axisLine={false} tick={{ fontSize: 11, fontWeight: 600, fill: 'currentColor' }} tickMargin={12} opacity={0.6} />
                     <YAxis domain={[0, 100]} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: 'currentColor' }} opacity={0.6} />
                     <RTC content={<CustomTooltip />} cursor={{ fill: 'rgba(99, 102, 241, 0.04)', rx: 8 }} />
-                    <ReferenceLine y={60} stroke="#10b981" strokeOpacity={0.4} strokeDasharray="4 4" label={{ position: 'top', value: 'Target 60%', fill: '#10b981', fontSize: 10, fontWeight: 700 }} />
+                    <ReferenceLine y={60} stroke="#f59e0b" strokeOpacity={0.4} strokeDasharray="4 4" label={{ position: 'top', value: 'Min 60%', fill: '#f59e0b', fontSize: 10, fontWeight: 700 }} />
+                    <ReferenceLine y={65} stroke="#84cc16" strokeOpacity={0.4} strokeDasharray="4 4" label={{ position: 'top', value: 'Good 65%', fill: '#84cc16', fontSize: 10, fontWeight: 700 }} />
+                    <ReferenceLine y={70} stroke="#10b981" strokeOpacity={0.4} strokeDasharray="4 4" label={{ position: 'top', value: 'Target 70%', fill: '#10b981', fontSize: 10, fontWeight: 700 }} />
                     <Bar dataKey="avg" name="Attainment %" radius={[8, 8, 0, 0]} isAnimationActive={true} animationDuration={1200} animationEasing="ease-out">
                       {coData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.avg >= 60 ? 'url(#colorAttained)' : 'url(#colorWatch)'} />
+                        <Cell key={`cell-${index}`} fill={entry.avg >= 70 ? 'url(#teacherCoExcellent)' : entry.avg >= 65 ? 'url(#teacherCoGood)' : entry.avg >= 60 ? 'url(#teacherCoMid)' : 'url(#teacherCoLow)'} />
                       ))}
                     </Bar>
                   </BarChart>
@@ -286,7 +319,22 @@ export default function TeacherClassTab({ reportData, selectedSubject, relevantS
       </Card>
 
       <div className="flex gap-3">
-        <Button size="sm" className="btn-gradient text-white rounded-xl gap-2 text-xs" onClick={() => exportClassReportPDF(`S${semester} Sec${section}`, classOverview.rows, classOverview.avg.toFixed(1), classOverview.passCount, classOverview.failCount)}><FileText className="h-3.5 w-3.5" /> Export PDF</Button>
+        <Button 
+          size="sm" 
+          className="btn-gradient text-white rounded-xl gap-2 text-xs" 
+          onClick={() => exportClassReportPDF(
+            `S${semester} Sec${section}`, 
+            classOverview.rows, 
+            classOverview.avg.toFixed(1), 
+            classOverview.passCount, 
+            classOverview.failCount,
+            coData,
+            resolvedSubjectName,
+            resolvedSubjectCode
+          )}
+        >
+          <FileText className="h-3.5 w-3.5" /> Export PDF
+        </Button>
         <Button size="sm" variant="outline" className="rounded-xl gap-2 text-xs" onClick={() => exportClassRosterExcel(classOverview.rows, { branch, semester, section, academicYear, avgPct: classOverview.avg.toFixed(1), passCount: classOverview.passCount, failCount: classOverview.failCount })}><FileSpreadsheet className="h-3.5 w-3.5" /> Export Detailed Excel</Button>
       </div>
 
@@ -323,7 +371,7 @@ export default function TeacherClassTab({ reportData, selectedSubject, relevantS
               )}
             </CardContent>
           </Card>
-          
+
           <Card className="glass-card">
             <CardHeader className="pb-2"><CardTitle className="text-sm font-heading font-semibold flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-red-500" /> Needs Attention {"(< 40%)"}</CardTitle></CardHeader>
             <CardContent className="space-y-3">
@@ -371,15 +419,15 @@ export default function TeacherClassTab({ reportData, selectedSubject, relevantS
               const excellent = classOverview.rows.filter(r => r.pct >= 75).length;
               const average = classOverview.rows.filter(r => r.pct >= 40 && r.pct < 75).length;
               const fail = classOverview.failCount;
-              
-              const pieData = !classOverview.hasData 
+
+              const pieData = !classOverview.hasData
                 ? [{ name: 'No Data', value: 1, color: '#e2e8f0', percentage: 100 }]
                 : [
-                    { name: 'Excellent', value: excellent, color: '#10b981', sub: '≥ 75%' },
-                    { name: 'Satisfactory', value: average, color: '#f59e0b', sub: '40-74%' },
-                    { name: 'At Risk', value: fail, color: '#ef4444', sub: '< 40%' }
-                  ].filter(d => d.value > 0);
-                  
+                  { name: 'Excellent', value: excellent, color: '#10b981', sub: '≥ 75%' },
+                  { name: 'Satisfactory', value: average, color: '#f59e0b', sub: '40-74%' },
+                  { name: 'At Risk', value: fail, color: '#ef4444', sub: '< 40%' }
+                ].filter(d => d.value > 0);
+
               return (
                 <div className="flex items-center gap-2">
                   <div className="w-[120px] h-[120px] shrink-0 relative">
@@ -400,7 +448,7 @@ export default function TeacherClassTab({ reportData, selectedSubject, relevantS
                             <Cell key={`cell-${index}`} fill={entry.color} />
                           ))}
                         </Pie>
-                        <RTC 
+                        <RTC
                           content={({ active, payload }) => {
                             if (active && payload?.[0]) {
                               const data = payload[0].payload;
@@ -417,7 +465,7 @@ export default function TeacherClassTab({ reportData, selectedSubject, relevantS
                               );
                             }
                             return null;
-                          }} 
+                          }}
                         />
                       </PieChart>
                     </ResponsiveContainer>
@@ -426,7 +474,7 @@ export default function TeacherClassTab({ reportData, selectedSubject, relevantS
                       <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground/70">Total</span>
                     </div>
                   </div>
-                  
+
                   <div className="flex-1 flex flex-col justify-center space-y-2 ml-2">
                     {pieData.map((d, i) => d.name !== 'No Data' && (
                       <div key={i} className="flex items-center justify-between">
@@ -470,15 +518,15 @@ export default function TeacherClassTab({ reportData, selectedSubject, relevantS
               {classOverview.rows.map((r, i) => {
                 const rowBg = r.maxPossible === 0 ? 'hover:bg-primary/[0.02]'
                   : r.pct >= 75 ? 'bg-emerald-500/10 hover:bg-emerald-500/20 cursor-pointer'
-                  : r.pct >= 40 ? 'bg-amber-500/10 hover:bg-amber-500/20 cursor-pointer'
-                  : 'bg-red-500/10 hover:bg-red-500/20 cursor-pointer';
+                    : r.pct >= 40 ? 'bg-amber-500/10 hover:bg-amber-500/20 cursor-pointer'
+                      : 'bg-red-500/10 hover:bg-red-500/20 cursor-pointer';
                 return (
                   <TableRow
                     key={i}
                     className={rowBg}
                     onClick={() => openStudent(r.student?.id)}
                   >
-                    <TableCell className="font-bold text-xs text-muted-foreground">#{i+1}</TableCell>
+                    <TableCell className="font-bold text-xs text-muted-foreground">#{i + 1}</TableCell>
                     <TableCell className="font-medium text-sm whitespace-nowrap">{r.student.name}</TableCell>
                     <TableCell className="text-xs font-mono text-muted-foreground">{r.student.regNo}</TableCell>
                     <TableCell className="text-xs">{r.midsem ?? '-'}</TableCell>

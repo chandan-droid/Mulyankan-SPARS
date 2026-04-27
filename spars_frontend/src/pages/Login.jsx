@@ -59,7 +59,7 @@ export default function Login() {
             <img src="/outr.png" alt="Logo" className="h-10 w-10 object-contain" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white uppercase">मूल्यांकन</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-white uppercase">ମୂଲ୍ୟାଙ୍କନ</h1>
             <p className="text-[10px] text-white/50 font-bold tracking-[0.2em] uppercase">OUTR Bhubaneswar</p>
           </div>
         </div>
@@ -76,7 +76,7 @@ export default function Login() {
               </span>
             </h2>
             <p className="text-lg text-slate-400 leading-relaxed max-w-md">
-              A precise analytics engine for CO-PO mapping and student academic reporting, built for modern educators.
+              A precise analytics engine for CO mapping and student academic reporting, built for modern educators.
             </p>
           </div>
 

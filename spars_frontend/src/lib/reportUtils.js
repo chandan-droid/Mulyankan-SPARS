@@ -245,56 +245,91 @@ export async function exportStudentReportPDF(report) {
 
   // Summary Metrics Section
   let y = 46;
-  const gradeObj = getGrade(parseFloat(report.percentage));
-  const isPass = parseFloat(report.percentage) >= 40;
+  const numericPercentage = Number(report?.percentage ?? 0);
+  const gradeObj = getGrade(numericPercentage);
+  const isPass = numericPercentage >= 40;
+  const studentName = report?.studentName || 'Student';
+  const regNo = report?.regNo || 'N/A';
+  const branch = report?.branch || 'N/A';
+  const semester = report?.semester || 'N/A';
+  const section = report?.section || 'N/A';
+  const safeRows = Array.isArray(report?.rows) ? report.rows : [];
+
+  const subjectSections = Object.values(
+    safeRows.reduce((acc, row) => {
+      const subjectName = row?.subjectName || row?.subject || report?.subjectName || report?.subject || 'Assessment Details';
+      const subjectCode = row?.subjectCode || report?.subjectCode || '';
+      const key = `${subjectName}|${subjectCode}`;
+      if (!acc[key]) {
+        acc[key] = {
+          subjectName,
+          subjectCode,
+          rows: [],
+        };
+      }
+      acc[key].rows.push(row);
+      return acc;
+    }, {})
+  ).map((sectionGroup) => {
+    const totalMarks = sectionGroup.rows.reduce((sum, row) => sum + Number(row.marks ?? 0), 0);
+    const maxPossible = sectionGroup.rows.reduce((sum, row) => sum + Number(row.maxMarks ?? 0), 0);
+    const percentage = maxPossible > 0 ? +((totalMarks / maxPossible) * 100).toFixed(1) : 0;
+    return {
+      ...sectionGroup,
+      totalMarks,
+      maxPossible,
+      percentage,
+    };
+  }).sort((a, b) => a.subjectName.localeCompare(b.subjectName));
   
   y = drawSummaryCards(doc, y, [
-    { label: 'Overall Score', value: `${report.totalMarks} / ${report.maxPossible}`, color: '#3b82f6' },
-    { label: 'Percentage', value: `${report.percentage}%`, color: getPerformanceColor(parseFloat(report.percentage)) },
-    { label: 'Grade', value: report.grade, color: gradeObj.color },
+    { label: 'Overall Score', value: `${report?.totalMarks ?? 0} / ${report?.maxPossible ?? 0}`, color: '#3b82f6' },
+    { label: 'Percentage', value: `${numericPercentage}%`, color: getPerformanceColor(numericPercentage) },
+    { label: 'Grade', value: report?.grade ?? gradeObj.grade, color: gradeObj.color },
     { label: 'Status', value: isPass ? 'Pass' : 'Fail', color: isPass ? '#10b981' : '#ef4444' }
   ]);
 
   y = infoBox(doc, [
-    ['Name',     report.studentName],
-    ['Reg. No.', report.regNo],
-    ['Class Details', `${report.branch} — Semester ${report.semester} (Section ${report.section})`],
+    ['Name',     studentName],
+    ['Reg. No.', regNo],
+    ['Class Details', `${branch} — Semester ${semester} (Section ${section})`],
   ], y);
-  
-  // Assessment Breakdown Graph
-  const graphData = report.rows.map(r => ({
-    label: r.type,
-    value: parseFloat(r.marks),
-    max: parseFloat(r.maxMarks),
-    displayValue: `${r.marks} / ${r.maxMarks}`,
-    color: '#0ea5e9'
-  }));
 
-  y = drawBarChart(doc, graphData, 14, y, 182, 50, 'Assessment Performance Chart');
+  if (subjectSections.length > 0) {
+    if (y + 24 > 280) {
+      doc.addPage();
+      y = 20;
+    }
 
-  if (y + 30 > 280) { doc.addPage(); y = 20; }
-  y = sectionTitle(doc, 'Score Table', y);
-
-  autoTable(doc, {
-    startY: y,
-    head: [['Subject', 'Assessment Type', 'Marks', 'Max', 'Percentage', 'Grade']],
-    body: report.rows.map(r => [
-      r.subject, r.type, r.marks, r.maxMarks, r.percentage + '%', getGrade(parseFloat(r.percentage)).grade,
-    ]),
-    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-    alternateRowStyles: { fillColor: [248, 250, 255] },
-    styles: { fontSize: 8, cellPadding: 3 },
-    didParseCell: data => {
-      if (data.column.index === 5 && data.section === 'body') {
-        const g = data.cell.raw;
-        const colors = { O: [22,163,74], 'A+': [34,197,94], A: [132,204,22], 'B+': [234,179,8], B: [249,115,22], C: [239,68,68], F: [220,38,38] };
-        data.cell.styles.textColor = colors[g] || [30,30,60];
-        data.cell.styles.fontStyle = 'bold';
+    for (const subjectSection of subjectSections) {
+      if (y + 34 > 280) {
+        doc.addPage();
+        y = 20;
       }
-    },
-  });
 
-  y = doc.lastAutoTable.finalY + 8;
+      const subjectLabel = subjectSection.subjectCode
+        ? `${subjectSection.subjectName} (${subjectSection.subjectCode})`
+        : subjectSection.subjectName;
+
+      y = sectionTitle(doc, subjectLabel, y);
+      y = drawSummaryCards(doc, y, [
+        { label: 'Assessments', value: subjectSection.rows.length, color: '#0ea5e9' },
+        { label: 'Total Score', value: `${subjectSection.totalMarks} / ${subjectSection.maxPossible}`, color: '#6366f1' },
+        { label: 'Subject %', value: `${subjectSection.percentage}%`, color: getPerformanceColor(subjectSection.percentage) },
+      ]);
+
+      const assessmentGraphData = subjectSection.rows.map((row) => ({
+        label: row.type,
+        value: Number(row.percentage ?? 0),
+        max: 100,
+        displayValue: `${row.marks} / ${row.maxMarks} (${Number(row.percentage ?? 0)}%)`,
+        color: getPerformanceColor(Number(row.percentage ?? 0)),
+      }));
+
+      y = drawBarChart(doc, assessmentGraphData, 14, y, 182, 50, 'Assessment Performance Chart (Normalized %)');
+      y += 2;
+    }
+  }
 
   if (report.coData && report.coData.length > 0) {
     if (y + 50 > 280) { doc.addPage(); y = 20; }
@@ -305,24 +340,6 @@ export async function exportStudentReportPDF(report) {
     }));
     
     y = drawBarChart(doc, coGraphData, 14, y, 182, 45, 'Course Outcome (CO) Attainment');
-    
-    autoTable(doc, {
-      startY: y,
-      head: [['CO', 'Obtained', 'Max', 'Attainment %', 'Status']],
-      body: report.coData.map(co => [
-        co.co, co.obtained, co.max, co.avg + '%',
-        co.avg >= 60 ? '✓ Attained' : '✗ Not Attained',
-      ]),
-      headStyles: { fillColor: [22, 120, 100], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-      alternateRowStyles: { fillColor: [240, 255, 248] },
-      styles: { fontSize: 8, cellPadding: 3 },
-      didParseCell: data => {
-        if (data.column.index === 4 && data.section === 'body') {
-          data.cell.styles.textColor = data.cell.raw.startsWith('✓') ? [22,163,74] : [220,38,38];
-          data.cell.styles.fontStyle = 'bold';
-        }
-      },
-    });
   }
 
   doc.save(`${report.studentName.replace(/ /g, '_')}_report.pdf`);
@@ -331,16 +348,18 @@ export async function exportStudentReportPDF(report) {
 // ─────────────────────────────────────────────
 // Class Report PDF
 // ─────────────────────────────────────────────
-export async function exportClassReportPDF(classLabel, rows, avgPct, passCount, failCount) {
+export async function exportClassReportPDF(classLabel, rows, avgPct, passCount, failCount, coData = [], subjectName = '', subjectCode = '') {
   const doc = new jsPDF();
-  await drawHeader(doc, 'Class Performance Report', `| ${classLabel}`);
+  const titleSuffix = subjectName ? `| ${subjectCode} - ${subjectName}` : `| ${classLabel}`;
+  await drawHeader(doc, 'Class Performance Report', titleSuffix);
 
   const numericAvg = Number(avgPct) || 0;
   const safeRows = Array.isArray(rows) ? rows : [];
-  const topStudent = safeRows.length > 0 ? safeRows[0] : null;
   const atRiskCount = safeRows.filter((r) => Number(r.pct ?? r.percentage ?? 0) < 40).length;
 
   let y = 46;
+  
+  // 1. Summary Cards
   y = drawSummaryCards(doc, y, [
     { label: 'Total Students', value: safeRows.length, color: '#0ea5e9' },
     { label: 'Class Average', value: `${numericAvg.toFixed(1)}%`, color: '#6366f1' },
@@ -348,8 +367,8 @@ export async function exportClassReportPDF(classLabel, rows, avgPct, passCount, 
     { label: 'At Risk (<40%)', value: atRiskCount, color: '#ef4444' }
   ]);
   
-  // Histogram bucketing logic
-  const buckets = [0,0,0,0]; // <40, 40-59, 60-74, 75-100
+  // 2. Grade Distribution
+  const buckets = [0, 0, 0, 0];
   safeRows.forEach(r => {
     const val = Number(r.pct ?? r.percentage ?? 0);
     if (val < 40) buckets[0]++;
@@ -357,42 +376,92 @@ export async function exportClassReportPDF(classLabel, rows, avgPct, passCount, 
     else if (val < 75) buckets[2]++;
     else buckets[3]++;
   });
-  
   const distGraph = [
-    { label: 'Fail (<40%)', value: buckets[0], max: safeRows.length, color: '#ef4444' },
-    { label: 'Avg (40-59%)', value: buckets[1], max: safeRows.length, color: '#f59e0b' },
+    { label: 'At Risk (<40%)', value: buckets[0], max: safeRows.length, color: '#ef4444' },
+    { label: 'Average (40-59%)', value: buckets[1], max: safeRows.length, color: '#f59e0b' },
     { label: 'Good (60-74%)', value: buckets[2], max: safeRows.length, color: '#6366f1' },
-    { label: 'Exc. (75%+)', value: buckets[3], max: safeRows.length, color: '#10b981' }
+    { label: 'Excellent (75%+)', value: buckets[3], max: safeRows.length, color: '#10b981' }
   ];
-  
   y = drawBarChart(doc, distGraph, 14, y, 182, 45, 'Grade Distribution Overview');
 
-  y = sectionTitle(doc, 'Student Roster', y);
+  // 3. CO Attainment Analysis (Chart & Table)
+  if (Array.isArray(coData) && coData.length > 0) {
+    y += 6;
+    const coGraphData = coData.map(co => ({
+      label: co.co || `CO${co.coNumber}`,
+      value: parseFloat(co.avg || 0),
+      max: 100,
+      displayValue: `${co.avg}%`,
+      color: parseFloat(co.avg || 0) >= 60 ? '#10b981' : '#ef4444'
+    }));
+    y = drawBarChart(doc, coGraphData, 14, y, 182, 45, 'CO Attainment Overview');
+
+    y = sectionTitle(doc, 'CO Attainment Details', y);
+    autoTable(doc, {
+      startY: y,
+      head: [['CO', 'Avg Obtained', 'Max Possible', 'Attainment %', 'Target', 'Status']],
+      body: coData.map(co => [
+        co.co || `CO${co.coNumber}`,
+        co.obtained?.toFixed(2) || co.avg || '0.00',
+        co.max?.toFixed(2) || '100.00',
+        `${parseFloat(co.avg || 0).toFixed(1)}%`,
+        '60%',
+        parseFloat(co.avg || 0) >= 60 ? 'Attained' : 'Critical'
+      ]),
+      headStyles: { fillColor: [16, 185, 129], fontSize: 8 },
+      styles: { fontSize: 7.5, cellPadding: 2.5 },
+      didParseCell: data => {
+        if (data.column.index === 5 && data.section === 'body') {
+          data.cell.styles.textColor = data.cell.raw === 'Attained' ? [5, 150, 105] : [220, 38, 38];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
+    });
+    y = doc.lastAutoTable.finalY + 8;
+  }
+
+  // 4. Detailed Student Roster
+  if (y > 240) { doc.addPage(); y = 20; }
+  y = sectionTitle(doc, 'Student Performance Roster (Component Breakdown)', y);
 
   autoTable(doc, {
     startY: y,
-    head: [['#', 'Student Name', 'Reg. No.', 'Tot/40', 'PCT', 'Grade', 'Status']],
+    head: [['Rank', 'Student Name', 'Reg No.', 'Mid', 'Quiz', 'Asgn', 'Att', 'Tot/40', 'PCT', 'Grade']],
     body: safeRows.map((r, i) => [
       i + 1,
-      r.name.length > 20 ? r.name.substring(0,20)+'..' : r.name,
+      r.name.length > 20 ? r.name.substring(0, 20) + '..' : r.name,
       r.regNo,
-      Number(r.totalOutOf40 ?? ((Number(r.pct ?? r.percentage ?? 0) * 0.4))).toFixed(1),
-      `${Number(r.pct ?? r.percentage ?? 0).toFixed(1)}%`,
-      r.grade,
-      r.status,
+      r.midsem ?? '-',
+      r.quiz ?? '-',
+      r.assignment ?? '-',
+      r.attendance ?? '-',
+      Number(r.totalOutOf40 || 0).toFixed(1),
+      `${Number(r.pct || 0).toFixed(1)}%`,
+      r.grade || 'F',
     ]),
-    headStyles: { fillColor: [14, 165, 233], textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
-    alternateRowStyles: { fillColor: [248, 250, 255] },
-    styles: { fontSize: 7.5, cellPadding: 2.5 },
+    headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
+    alternateRowStyles: { fillColor: [250, 251, 255] },
+    styles: { fontSize: 7, cellPadding: 2, valign: 'middle', halign: 'center' },
+    columnStyles: { 
+      1: { halign: 'left', cellWidth: 35 },
+      2: { halign: 'left', cellWidth: 25 }
+    },
     didParseCell: data => {
-      if (data.column.index === 6 && data.section === 'body') {
-        data.cell.styles.textColor = data.cell.raw === 'Pass' ? [22,163,74] : [220,38,38];
-        data.cell.styles.fontStyle = 'bold';
+      if (data.section === 'body') {
+        const rowData = safeRows[data.row.index];
+        const pct = Number(rowData.pct || 0);
+        
+        // Match UI row colors
+        if (pct >= 75) data.cell.styles.fillColor = [209, 250, 229];
+        else if (pct >= 40) data.cell.styles.fillColor = [254, 243, 199];
+        else data.cell.styles.fillColor = [254, 226, 226];
+
+        if (data.column.index === 8) data.cell.styles.fontStyle = 'bold';
       }
     },
   });
 
-  doc.save(`Class_${classLabel.replace(/ /g, '_')}_report.pdf`);
+  doc.save(`Class_Report_${classLabel.replace(/ /g, '_')}_${subjectCode || 'Full'}.pdf`);
 }
 
 // ─────────────────────────────────────────────

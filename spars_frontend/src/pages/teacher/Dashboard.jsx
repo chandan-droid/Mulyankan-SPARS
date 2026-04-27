@@ -3,8 +3,7 @@ import { useEffect, useState } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import {
   LayoutDashboard, PenLine, FileBarChart, BookOpen, ClipboardList,
-  ArrowUpRight, TrendingUp, Award, CheckCircle, Users, Calendar,
-  BarChart3, Settings, Target, Zap, School,
+  TrendingUp, Award, Users, BarChart3, Settings, Target, Zap,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -22,14 +21,13 @@ import {
 } from '@/lib/teacherApi';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, CartesianGrid,
-  LineChart, Line,
+  LineChart, Line, ReferenceLine,
 } from 'recharts';
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard',       path: '/teacher' },
   { icon: PenLine,         label: 'Mark Entry',      path: '/teacher/marks' },
   { icon: FileBarChart,    label: 'Reports',         path: '/teacher/reports' },
-  { icon: School,          label: 'Assigned Classes', path: '/teacher/classes' },
   { icon: Settings,        label: 'Settings',        path: '/teacher/settings' },
 ];
 export { navItems as teacherNavItems };
@@ -70,24 +68,6 @@ function Kpi({ icon: Icon, label, value, helper, tone, badge }) {
   );
 }
 
-function QuickAction({ icon: Icon, label, desc, path, color, navigate }) {
-  return (
-    <button
-      type="button"
-      onClick={() => navigate(path)}
-      className="group flex items-start gap-3 rounded-2xl border border-border/50 bg-card/70 p-4 text-left backdrop-blur-sm shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary/5"
-    >
-      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${color} transition-transform duration-300 group-hover:scale-105`}>
-        <Icon className="h-5 w-5" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="font-semibold text-sm text-foreground">{label}</p>
-        <p className="text-[11px] text-muted-foreground mt-0.5">{desc}</p>
-      </div>
-      <ArrowUpRight className="h-4 w-4 shrink-0 text-muted-foreground/30 transition-all group-hover:text-primary group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-    </button>
-  );
-}
 
 /* ── main component ───────────────────────────────────────────────────────── */
 export default function TeacherDashboard() {
@@ -291,13 +271,19 @@ export default function TeacherDashboard() {
   const classList = Object.values(classMap);
   // Prefer analytics API total (most accurate); sum of class counts as fallback
   const totalStudents = classList.reduce((s, c) => s + (c.studentCount || 0), 0);
-  const uniqueSubs    = [...new Set(assignments.map(a => a.subjectId))];
   const localLoggedMarks = marks.filter(m => myAssessments.some(a => a.id === m.assessmentId)).length;
-  const apiLoggedMarks = (apiMarkProgress?.progressByAssessmentType ?? []).reduce(
-    (sum, item) => sum + Number(item?.recordedAssessments ?? 0),
-    0
-  );
-  const totalMarks = apiLoggedMarks > 0 ? apiLoggedMarks : localLoggedMarks;
+
+  /* calculate student-level records (assessment * students) */
+  const totalPotentialRecords = myAssessments.reduce((sum, a) => {
+    const cd = apiClassDetails[String(a.classId ?? '')];
+    return sum + (cd?.studentCount ?? 0);
+  }, 0);
+
+  const actualLoggedRecords = apiMarkProgress?.averageProgressPercentage != null
+    ? Math.round(totalPotentialRecords * (Number(apiMarkProgress.averageProgressPercentage) / 100))
+    : localLoggedMarks;
+
+  const totalMarks = actualLoggedRecords;
 
   /* chart data — use API-resolved branch, prefer API endpoint data */
   const branchData = apiBranchData
@@ -318,28 +304,46 @@ export default function TeacherDashboard() {
 
   /* progress per assessment type — prefer API endpoint, fall back to local computation */
   const markProgress = apiMarkProgress?.progressByAssessmentType
-    ? apiMarkProgress.progressByAssessmentType.map(item => ({
-        type: item.assessmentType,
-        total: Number(item.totalAssessments ?? 0),
-        done:  Number(item.recordedAssessments ?? 0),
-        pct:   Math.round(Number(item.progressPercentage ?? 0)),
-      }))
+    ? apiMarkProgress.progressByAssessmentType.map(item => {
+        const typeAssessments = myAssessments.filter(a => a.type === item.assessmentType);
+        const typePotentialRecords = typeAssessments.reduce((sum, a) => {
+          const cd = apiClassDetails[String(a.classId ?? '')];
+          return sum + (cd?.studentCount ?? 0);
+        }, 0);
+        const typeDoneRecords = Math.round(typePotentialRecords * (Number(item.progressPercentage ?? 0) / 100));
+        
+        return {
+          type: item.assessmentType,
+          total: typePotentialRecords,
+          done:  typeDoneRecords,
+          pct:   Math.round(Number(item.progressPercentage ?? 0)),
+        };
+      })
     : ASSESS_TYPES.map(type => {
         const typed = myAssessments.filter(a => a.type === type);
-        const done  = marks.filter(m => typed.some(a => a.id === m.assessmentId)).length;
-        return { type, total: typed.length, done, pct: typed.length ? Math.round((done / typed.length) * 100) : 0 };
+        const typePotential = typed.reduce((sum, a) => {
+          const cd = apiClassDetails[String(a.classId ?? '')];
+          return sum + (cd?.studentCount ?? 0);
+        }, 0);
+        const doneRecords = marks.filter(m => typed.some(a => a.id === m.assessmentId)).length;
+        return { 
+          type, 
+          total: typePotential, 
+          done: doneRecords, 
+          pct: typePotential ? Math.round((doneRecords / typePotential) * 100) : 0 
+        };
       });
 
   /* avg for the header badge */
   const markProgressAvg = apiMarkProgress?.averageProgressPercentage != null
     ? Math.round(Number(apiMarkProgress.averageProgressPercentage))
-    : (myAssessments.length ? Math.round((totalMarks / myAssessments.length) * 100) : 0);
+    : (totalPotentialRecords ? Math.round((totalMarks / totalPotentialRecords) * 100) : 0);
 
   const recentAssessments = [...myAssessments]
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
     .slice(0, 5);
 
-  const firstName = (user?.name || 'Teacher').split(' ')[0];
+  const teacherName = user?.name || 'Teacher';
 
   return (
     <DashboardLayout navItems={navItems}>
@@ -350,7 +354,7 @@ export default function TeacherDashboard() {
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/50 mb-1">Teacher</p>
             <h1 className="text-2xl font-heading font-bold tracking-tight text-foreground">
-              Welcome back, {firstName}
+              Welcome back, {teacherName}
             </h1>
             <p className="mt-1 text-[13px] text-muted-foreground">Here's your teaching overview for today.</p>
           </div>
@@ -375,7 +379,7 @@ export default function TeacherDashboard() {
           <Kpi icon={BookOpen}     label="Assignments"  value={assignments.length}  helper="Current teaching load" tone="stat-gradient-blue"  badge="Live" />
           <Kpi icon={ClipboardList} label="Assessments" value={myAssessments.length} helper="Linked to your classes" tone="stat-gradient-teal"  badge="Active" />
           <Kpi icon={Users}        label="Students"     value={totalStudents}        helper="Across your sections"   tone="stat-gradient-amber" badge="Total" />
-          <Kpi icon={Award}        label="Marks Logged" value={totalMarks}           helper="Submitted scores"       tone="stat-gradient-rose"  badge="Entry" />
+          <Kpi icon={Award}        label="Marks Logged" value={totalMarks}           helper={`of ${totalPotentialRecords} total records`} tone="stat-gradient-rose"  badge="Entry" />
         </div>
 
         {/* ── Mid: Progress + Charts ───────────────────────────── */}
@@ -469,39 +473,10 @@ export default function TeacherDashboard() {
           </div>
         </div>
 
-        {/* ── Bottom: Recent Activity + Classes + Quick Actions ─── */}
-        <div className="grid gap-4 lg:grid-cols-[1fr_1fr_0.7fr]">
-          {/* Recent assessments */}
-          <div className="rounded-2xl border border-border/50 bg-card/70 p-5 backdrop-blur-sm shadow-sm">
-            <div className="mb-4 flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg stat-gradient-blue shadow">
-                <Calendar className="h-3.5 w-3.5 text-white" />
-              </div>
-              <p className="text-sm font-heading font-semibold text-foreground">Recent Assessments</p>
-            </div>
-            <div className="space-y-2.5">
-              {recentAssessments.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No assessments yet.</p>
-              ) : recentAssessments.map(a => {
-                const cd = apiClassDetails[String(a.classId ?? '')] ?? {};
-                const branch   = cd.branch   ?? a.branch   ?? '—';
-                const semester = cd.semester ?? a.semester ?? '—';
-                const section  = cd.section  ?? a.section  ?? '—';
-                return (
-                  <div key={a.id} className="flex items-center justify-between gap-3 rounded-xl border border-border/40 bg-background/40 px-3 py-2.5">
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-foreground truncate">{a.name || a.type}</p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">{branch} · Sem {semester} · Sec {section}</p>
-                    </div>
-                    <span className="shrink-0 rounded-md bg-muted/60 px-2 py-0.5 text-[10px] font-semibold text-foreground">{a.type}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Class list */}
-          <div className="rounded-2xl border border-border/50 bg-card/70 p-5 backdrop-blur-sm shadow-sm">
+        {/* ── Bottom: Classes + CO Attainment ─── */}
+        <div className="grid gap-6 lg:grid-cols-3 mt-6">
+          {/* Class list (1/3) */}
+          <div className="rounded-2xl border border-border/50 bg-card/70 p-5 backdrop-blur-sm shadow-sm h-full">
             <div className="mb-4 flex items-center gap-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg stat-gradient-teal shadow">
                 <BookOpen className="h-3.5 w-3.5 text-white" />
@@ -511,7 +486,7 @@ export default function TeacherDashboard() {
             <div className="space-y-2.5">
               {classList.length === 0 ? (
                 <p className="text-xs text-muted-foreground">No classes assigned yet.</p>
-              ) : classList.slice(0, 5).map(c => {
+              ) : classList.slice(0, 10).map(c => {
                 const sub = subjects.find(s => s.id === c.subjectId);
                 return (
                   <div key={`${c.classId}-${c.subjectId}`} className="flex items-center justify-between gap-3 rounded-xl border border-border/40 bg-background/40 px-3 py-2.5">
@@ -529,115 +504,98 @@ export default function TeacherDashboard() {
             </div>
           </div>
 
-          {/* Snapshot + Quick actions */}
-          <div className="flex flex-col gap-4">
-            <div className="rounded-2xl border border-border/50 bg-card/70 p-5 backdrop-blur-sm shadow-sm">
-              <div className="mb-4 flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg stat-gradient-amber shadow">
-                  <CheckCircle className="h-3.5 w-3.5 text-white" />
+          {/* CO Attainment (2/3) */}
+          <div className="lg:col-span-2 rounded-2xl border border-border/50 bg-card/70 p-5 backdrop-blur-sm shadow-sm h-full">
+            <div className="mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg stat-gradient-blue shadow">
+                  <Target className="h-3.5 w-3.5 text-white" />
                 </div>
-                <p className="text-sm font-heading font-semibold text-foreground">Snapshot</p>
+                <div>
+                  <p className="text-sm font-heading font-semibold text-foreground">Class CO Attainment</p>
+                  <p className="text-[11px] text-muted-foreground">Course outcome tracking</p>
+                </div>
               </div>
-              <div className="space-y-3">
-                {[
-                  {
-                    label: 'Subjects', 
-                    val: uniqueSubs.length,
-                    pct: Math.min(100, uniqueSubs.length * 20),
-                  },
-                  {
-                    label: 'Mark Completion',
-                    val: `${myAssessments.length ? Math.min(100, Math.round((totalMarks / myAssessments.length) * 100)) : 0}%`,
-                    pct: myAssessments.length ? Math.min(100, Math.round((totalMarks / myAssessments.length) * 100)) : 0,
-                  },
-                ].map(item => (
-                  <div key={item.label}>
-                    <div className="flex items-center justify-between mb-1">
-                      <p className="text-xs text-foreground">{item.label}</p>
-                      <span className="text-[11px] font-bold text-foreground">{item.val}</span>
-                    </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-muted/60">
-                      <div className="h-full rounded-full stat-gradient-teal transition-all duration-700" style={{ width: `${item.pct}%` }} />
-                    </div>
-                  </div>
-                ))}
+              <div className="w-full sm:w-64">
+                <Select value={selectedAssignmentKey} onValueChange={setSelectedAssignmentKey}>
+                  <SelectTrigger className="h-9 text-xs rounded-xl bg-background/50">
+                    <SelectValue placeholder="Select Class/Subject" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assignments.map(a => {
+                      const sub = subjects.find(s => s.id === a.subjectId);
+                      const cd = apiClassDetails[String(a.classId ?? '')] ?? {};
+                      const branch   = cd.branch   ?? a.branch   ?? '—';
+                      const semester = cd.semester ?? a.semester ?? '—';
+                      const section  = cd.section  ?? a.section  ?? '—';
+                      const ayear    = cd.academicYear ?? '';
+                      return (
+                        <SelectItem key={`${a.classId}|${a.subjectId}`} value={`${a.classId}|${a.subjectId}`}>
+                          <span className="font-medium">{sub?.subjectCode || sub?.subjectName || a.subjectId}</span>
+                          <span className="ml-1.5 text-muted-foreground">
+                            {branch} S{semester}{section}{ayear ? ` · ${ayear}` : ''}
+                          </span>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
-            <QuickAction
-              icon={PenLine}
-              label="Enter Marks"
-              desc="Record assessment scores"
-              path="/teacher/marks"
-              color="bg-primary/10 text-primary"
-              navigate={navigate}
-            />
-          </div>
-        </div>
-
-        {/* ── CO Attainment Row ───────────────────────────────────────── */}
-        <div className="rounded-2xl border border-border/50 bg-card/70 p-5 backdrop-blur-sm shadow-sm mt-6">
-          <div className="mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg stat-gradient-blue shadow">
-                <Target className="h-3.5 w-3.5 text-white" />
-              </div>
-              <div>
-                <p className="text-sm font-heading font-semibold text-foreground">Class CO Attainment</p>
-                <p className="text-[11px] text-muted-foreground">Course outcome tracking</p>
-              </div>
+            <div className="flex flex-wrap gap-2 mb-6">
+                <div className="rounded-xl bg-white dark:bg-slate-900 shadow-sm border border-border/50 px-3 py-1.5 flex items-center gap-2">
+                  <div className="h-2 w-2 rounded-full bg-red-500" />
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase">0-60:</span>
+                  <span className="text-xs font-bold text-foreground">{coData.filter(co => co.AvgPercentage < 60).length}</span>
+                </div>
+                <div className="rounded-xl bg-white dark:bg-slate-900 shadow-sm border border-border/50 px-3 py-1.5 flex items-center gap-2">
+                  <div className="h-2 w-2 rounded-full bg-amber-500" />
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase">60-65:</span>
+                  <span className="text-xs font-bold text-foreground">{coData.filter(co => co.AvgPercentage >= 60 && co.AvgPercentage < 65).length}</span>
+                </div>
+                <div className="rounded-xl bg-white dark:bg-slate-900 shadow-sm border border-border/50 px-3 py-1.5 flex items-center gap-2">
+                  <div className="h-2 w-2 rounded-full bg-lime-500" />
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase">65-70:</span>
+                  <span className="text-xs font-bold text-foreground">{coData.filter(co => co.AvgPercentage >= 65 && co.AvgPercentage < 70).length}</span>
+                </div>
+                <div className="rounded-xl bg-white dark:bg-slate-900 shadow-sm border border-border/50 px-3 py-1.5 flex items-center gap-2">
+                  <div className="h-2 w-2 rounded-full bg-emerald-500" />
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase">70+:</span>
+                  <span className="text-xs font-bold text-foreground">{coData.filter(co => co.AvgPercentage >= 70).length}</span>
+                </div>
             </div>
-            <div className="w-full sm:w-64">
-              <Select value={selectedAssignmentKey} onValueChange={setSelectedAssignmentKey}>
-                <SelectTrigger className="h-9 text-xs rounded-xl bg-background/50">
-                  <SelectValue placeholder="Select Class/Subject" />
-                </SelectTrigger>
-                <SelectContent>
-                  {assignments.map(a => {
-                    const sub = subjects.find(s => s.id === a.subjectId);
-                    const cd = apiClassDetails[String(a.classId ?? '')] ?? {};
-                    const branch   = cd.branch   ?? a.branch   ?? '—';
-                    const semester = cd.semester ?? a.semester ?? '—';
-                    const section  = cd.section  ?? a.section  ?? '—';
-                    const ayear    = cd.academicYear ?? '';
-                    return (
-                      <SelectItem key={`${a.classId}|${a.subjectId}`} value={`${a.classId}|${a.subjectId}`}>
-                        <span className="font-medium">{sub?.subjectCode || sub?.subjectName || a.subjectId}</span>
-                        <span className="ml-1.5 text-muted-foreground">
-                          {branch} S{semester}{section}{ayear ? ` · ${ayear}` : ''}
-                        </span>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
+            
+            <div className="h-[280px]">
+               {loadingCo ? (
+                 <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                   <Loader2 className="h-4 w-4 animate-spin mr-2" /> Syncing Attainment...
+                 </div>
+               ) : coData.length > 0 ? (
+                 <ResponsiveContainer width="100%" height="100%">
+                   <BarChart data={coData} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
+                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                     <XAxis dataKey="name" tickLine={false} axisLine={false} stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                     <YAxis domain={[0, 100]} tickLine={false} axisLine={false} stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                     <Tooltip cursor={{ fill: 'hsl(var(--muted)/0.35)' }} contentStyle={TOOLTIP_STYLE} />
+                     <ReferenceLine y={60} stroke="hsl(35 95% 58%)" strokeOpacity={0.4} strokeDasharray="4 4" label={{ position: 'top', value: '60%', fill: 'hsl(35 95% 58%)', fontSize: 9, fontWeight: 700 }} />
+                     <ReferenceLine y={65} stroke="hsl(84 81% 44%)" strokeOpacity={0.4} strokeDasharray="4 4" label={{ position: 'top', value: '65%', fill: 'hsl(84 81% 44%)', fontSize: 8, fontWeight: 700 }} />
+                      <ReferenceLine y={70} stroke="hsl(168 60% 48%)" strokeOpacity={0.4} strokeDasharray="4 4" label={{ position: 'top', value: '70%', fill: 'hsl(168 60% 48%)', fontSize: 8, fontWeight: 700 }} />
+                     <Bar dataKey="AvgPercentage" radius={[6, 6, 0, 0]} barSize={36}>
+                        {coData.map((entry, i) => {
+                          const val = entry.AvgPercentage;
+                          const fill = val >= 70 ? 'hsl(168 60% 48%)' : val >= 65 ? 'hsl(84 81% 44%)' : val >= 60 ? 'hsl(35 95% 58%)' : 'hsl(0 72% 55%)';
+                          return <Cell key={i} fill={fill} />;
+                        })}
+                     </Bar>
+                   </BarChart>
+                 </ResponsiveContainer>
+               ) : (
+                 <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                   No CO Attainment data for selected combination.
+                 </div>
+               )}
             </div>
-          </div>
-          
-          <div className="h-[250px]">
-             {loadingCo ? (
-               <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                 <Loader2 className="h-4 w-4 animate-spin mr-2" /> Syncing Attainment...
-               </div>
-             ) : coData.length > 0 ? (
-               <ResponsiveContainer width="100%" height="100%">
-                 <BarChart data={coData} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
-                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                   <XAxis dataKey="name" tickLine={false} axisLine={false} stroke="hsl(var(--muted-foreground))" fontSize={11} />
-                   <YAxis domain={[0, 100]} tickLine={false} axisLine={false} stroke="hsl(var(--muted-foreground))" fontSize={11} />
-                   <Tooltip cursor={{ fill: 'hsl(var(--muted)/0.35)' }} contentStyle={TOOLTIP_STYLE} />
-                   <Bar dataKey="AvgPercentage" radius={[6, 6, 0, 0]} barSize={36}>
-                      {coData.map((entry, i) => (
-                        <Cell key={i} fill={entry.AvgPercentage >= 60 ? 'hsl(168 60% 48%)' : 'hsl(0 72% 55%)'} />
-                      ))}
-                   </Bar>
-                 </BarChart>
-               </ResponsiveContainer>
-             ) : (
-               <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                 No CO Attainment data for selected combination.
-               </div>
-             )}
           </div>
         </div>
 

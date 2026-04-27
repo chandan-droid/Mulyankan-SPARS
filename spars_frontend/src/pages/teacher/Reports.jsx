@@ -161,16 +161,45 @@ export default function TeacherReports() {
       const s = allSubjects.find((sub) => sub.id === a.subjectId);
       // Enrich branch/semester/section from API class details when assignment has nulls
       const cd = assignmentClassDetailsMap[String(a.classId ?? '')] ?? {};
+      const classSubject = Array.isArray(cd.subjects)
+        ? cd.subjects.find(
+          (subject) =>
+            String(subject?.id ?? subject?.subjectId ?? subject ?? '') === String(a.subjectId)
+        )
+        : null;
       acc.push({
         ...a,
-        branch:   cd.branch   ?? a.branch   ?? '',
+        branch: cd.branch ?? a.branch ?? '',
         semester: cd.semester ?? a.semester ?? '',
-        section:  cd.section  ?? a.section  ?? '',
+        section: cd.section ?? a.section ?? '',
         academicYear: cd.academicYear ?? a.academicYear ?? a.academic_year ?? '',
         studentCount: cd.studentCount ?? null,
         key,
-        subjectName: s?.subjectName || '',
-        subjectCode: s?.subjectCode || '',
+        subjectName:
+          s?.subjectName ||
+          s?.name ||
+          classSubject?.subjectName ||
+          classSubject?.subject_name ||
+          classSubject?.name ||
+          (typeof classSubject === 'string' ? classSubject : '') ||
+          a?.subjectName ||
+          a?.subject_name ||
+          a?.subject?.subjectName ||
+          a?.subject?.subject_name ||
+          a?.subject?.name ||
+          '',
+        subjectCode:
+          s?.subjectCode ||
+          s?.code ||
+          classSubject?.subjectCode ||
+          classSubject?.subject_code ||
+          classSubject?.code ||
+          a?.subjectCode ||
+          a?.subject_code ||
+          a?.subject?.subjectCode ||
+          a?.subject?.subject_code ||
+          a?.subject?.code ||
+          '',
       });
       return acc;
     }, []);
@@ -275,8 +304,8 @@ export default function TeacherReports() {
         let qmsSettled = [];
         if (currentAssignmentClassId != null) {
           qmsSettled = await Promise.allSettled(
-            Array.from(midsemAssessments).map((assessmentId) => 
-               getQuestionMarksByAssessmentAndClass(assessmentId, currentAssignmentClassId)
+            Array.from(midsemAssessments).map((assessmentId) =>
+              getQuestionMarksByAssessmentAndClass(assessmentId, currentAssignmentClassId)
             )
           );
         } else {
@@ -317,20 +346,60 @@ export default function TeacherReports() {
   ]);
 
   const subjectInfo = useMemo(() => {
-    return allSubjects.find((s) => String(s.id) === String(selectedSubject));
-  }, [selectedSubject, allSubjects]);
+    if (!selectedSubject) return null;
+
+    const fromMasterSubjects = allSubjects.find(
+      (s) => String(s.id ?? s.subjectId ?? '') === String(selectedSubject)
+    );
+    if (fromMasterSubjects) return fromMasterSubjects;
+
+    const classDetailsFromMap = assignmentClassDetailsMap[String(currentAssignment?.classId ?? '')] ?? {};
+    const classSubjectList = Array.isArray(apiClassDetails?.subjects)
+      ? apiClassDetails.subjects
+      : Array.isArray(classDetailsFromMap?.subjects)
+        ? classDetailsFromMap.subjects
+        : [];
+    const fromClassDetails = classSubjectList.find(
+      (s) => String(s?.id ?? s?.subjectId ?? s ?? '') === String(selectedSubject)
+    );
+    if (fromClassDetails) return fromClassDetails;
+
+    if (currentAssignment) {
+      return {
+        id: currentAssignment.subjectId,
+        subjectName:
+          currentAssignment.subjectName ||
+          currentAssignment.subject?.subjectName ||
+          currentAssignment.subject?.name ||
+          null,
+        subjectCode:
+          currentAssignment.subjectCode ||
+          currentAssignment.subject?.subjectCode ||
+          currentAssignment.subject?.code ||
+          null,
+      };
+    }
+
+    return null;
+  }, [
+    selectedSubject,
+    allSubjects,
+    assignmentClassDetailsMap,
+    currentAssignment,
+    apiClassDetails,
+  ]);
 
   const currentClassInfo = useMemo(() => {
     const classDetails = apiClassDetails ?? {};
     // Also read from the assignment-level classDetailsMap as a richer fallback
     const cdMap = assignmentClassDetailsMap[String(currentAssignment?.classId ?? '')] ?? {};
     return {
-      branch:      classDetails.branch      ?? cdMap.branch      ?? currentAssignment?.branch      ?? '',
-      semester:    classDetails.semester    ?? cdMap.semester    ?? currentAssignment?.semester    ?? '',
-      section:     classDetails.section     ?? cdMap.section     ?? currentAssignment?.section     ?? '',
+      branch: classDetails.branch ?? cdMap.branch ?? currentAssignment?.branch ?? '',
+      semester: classDetails.semester ?? cdMap.semester ?? currentAssignment?.semester ?? '',
+      section: classDetails.section ?? cdMap.section ?? currentAssignment?.section ?? '',
       academicYear: classDetails.academicYear ?? cdMap.academicYear ?? currentAssignment?.academicYear ?? currentAssignment?.academic_year ?? '',
       studentCount: Number(classDetails.studentCount ?? cdMap.studentCount ?? apiClassStudents.length ?? 0),
-      subjects:    Array.isArray(classDetails.subjects) ? classDetails.subjects : [],
+      subjects: Array.isArray(classDetails.subjects) ? classDetails.subjects : [],
     };
   }, [apiClassDetails, assignmentClassDetailsMap, currentAssignment, apiClassStudents.length]);
 
@@ -384,7 +453,6 @@ export default function TeacherReports() {
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-500 shadow-md">
               <FileBarChart className="h-5 w-5 text-white" />
             </div>
-            <img src="/outr.png" alt="OUTR logo" className="h-10 w-10 rounded-lg border border-sky-100 bg-white p-1" />
             <div>
               <h1 className="text-2xl font-heading font-bold tracking-tight text-sky-700">
                 Performance Reports
@@ -394,41 +462,41 @@ export default function TeacherReports() {
               </p>
             </div>
           </div>
-        
+
           {/* Global Subject Selector */}
           <div className="w-full md:w-64">
-             <Select value={selectedAssignmentKey} onValueChange={setSelectedAssignmentKey}>
-               <SelectTrigger className="w-full rounded-xl h-10 bg-white border-sky-200">
-                 <div className="flex items-center gap-2">
-                   {loadingAssignments || loadingClassData
-                     ? <Loader2 className="h-4 w-4 text-sky-600 animate-spin" />
-                     : <BookOpen className="h-4 w-4 text-sky-600" />}
-                   <SelectValue placeholder="Select Class/Subject" />
-                 </div>
-               </SelectTrigger>
-               <SelectContent>
-                  {assignedSubjects.map((s) => (
-                    <SelectItem key={s.key} value={s.key}>
-                      <div className="flex flex-col text-left">
-                        <span className="font-medium text-sm">{s.subjectCode} - {s.subjectName}</span>
-                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                          {s.branch || '—'} &bull; Sem {s.semester || '—'} &bull; Sec {s.section || '—'}
-                          {s.studentCount != null ? ` • ${s.studentCount} stu.` : ''}
-                        </span>
-                      </div>
-                    </SelectItem>
-                  ))}
-               </SelectContent>
-             </Select>
+            <Select value={selectedAssignmentKey} onValueChange={setSelectedAssignmentKey}>
+              <SelectTrigger className="w-full rounded-xl h-10 bg-white border-sky-200">
+                <div className="flex items-center gap-2">
+                  {loadingAssignments || loadingClassData
+                    ? <Loader2 className="h-4 w-4 text-sky-600 animate-spin" />
+                    : <BookOpen className="h-4 w-4 text-sky-600" />}
+                  <SelectValue placeholder="Select Class/Subject" />
+                </div>
+              </SelectTrigger>
+              <SelectContent>
+                {assignedSubjects.map((s) => (
+                  <SelectItem key={s.key} value={s.key}>
+                    <div className="flex flex-col text-left">
+                      <span className="font-medium text-sm">{s.subjectCode} - {s.subjectName}</span>
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                        {s.branch || '—'} &bull; Sem {s.semester || '—'} &bull; Sec {s.section || '—'}
+                        {s.studentCount != null ? ` • ${s.studentCount} stu.` : ''}
+                      </span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-sky-50 border border-sky-100 p-1 rounded-xl flex flex-wrap h-auto gap-1">
-            <TabsTrigger value="classOverview" className="rounded-lg text-xs font-semibold text-sky-700 data-[state=active]:bg-white data-[state=active]:shadow-sm">
-              🏫 Class Overview
+          <TabsList className="grid w-full grid-cols-3 bg-fuchsia-500/10 p-1 rounded-xl">
+            <TabsTrigger value="classOverview" className="rounded-lg text-xs font-semibold text-fuchsia-700 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+              📊 Class Overview
             </TabsTrigger>
-            <TabsTrigger value="student" className="rounded-lg text-xs font-semibold text-violet-700 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <TabsTrigger value="student" className="rounded-lg text-xs font-semibold text-fuchsia-700 data-[state=active]:bg-white data-[state=active]:shadow-sm">
               👤 Student Report
             </TabsTrigger>
             <TabsTrigger value="deepdive" className="rounded-lg text-xs font-semibold text-fuchsia-700 data-[state=active]:bg-white data-[state=active]:shadow-sm">
@@ -436,47 +504,60 @@ export default function TeacherReports() {
             </TabsTrigger>
           </TabsList>
 
-        <TabsContent value="classOverview" className="mt-6">
-           {selectedSubject ? (
-             <div className="space-y-8">
-               <TeacherClassTab
-                 reportData={reportData}
-                 selectedSubject={selectedSubject}
-                 relevantStudents={relevantStudents}
+          <TabsContent value="classOverview" className="mt-6">
+            {selectedSubject ? (
+              <div className="space-y-8">
+                <TeacherClassTab
+                  reportData={reportData}
+                  selectedSubject={selectedSubject}
+                  subjectName={currentAssignment?.subjectName}
+                  subjectCode={currentAssignment?.subjectCode}
+                  relevantStudents={relevantStudents}
+                  branch={currentClassInfo.branch}
+                  semester={currentClassInfo.semester}
+                  section={currentClassInfo.section}
+                  studentCount={currentClassInfo.studentCount || null}
+                  academicYear={currentClassInfo.academicYear}
+                  onOpenStudentReport={handleOpenStudentReport}
+                />
+              </div>
+            ) : (
+              <div className="text-center py-24 text-muted-foreground"><BookOpen className="h-10 w-10 mx-auto mb-3 opacity-20" />Select a Class/Subject above to view reports.</div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="student" className="mt-6">
+            {selectedSubject ? (
+              <TeacherStudentTab
+                reportData={reportData}
+                selectedSubject={selectedSubject}
+                subjectName={currentAssignment?.subjectName}
+                subjectCode={currentAssignment?.subjectCode}
+                relevantStudents={relevantStudents}
                 branch={currentClassInfo.branch}
                 semester={currentClassInfo.semester}
                 section={currentClassInfo.section}
-                studentCount={currentClassInfo.studentCount || null}
                 academicYear={currentClassInfo.academicYear}
-                  onOpenStudentReport={handleOpenStudentReport}
-               />
-             </div>
-           ) : (
-             <div className="text-center py-24 text-muted-foreground"><BookOpen className="h-10 w-10 mx-auto mb-3 opacity-20" />Select a Class/Subject above to view reports.</div>
-           )}
-        </TabsContent>
+                preselectedStudentId={preselectedStudentId}
+              />
+            ) : (
+              <div className="text-center py-24 text-muted-foreground"><BookOpen className="h-10 w-10 mx-auto mb-3 opacity-20" />Select a Class/Subject above to view reports.</div>
+            )}
+          </TabsContent>
 
-        <TabsContent value="student" className="mt-6">
-           {selectedSubject ? (
-             <TeacherStudentTab
-               reportData={reportData}
-               selectedSubject={selectedSubject}
-               relevantStudents={relevantStudents}
-               subjectInfo={subjectInfo}
-               preselectedStudentId={preselectedStudentId}
-             />
-           ) : (
-             <div className="text-center py-24 text-muted-foreground"><BookOpen className="h-10 w-10 mx-auto mb-3 opacity-20" />Select a Class/Subject above to view reports.</div>
-           )}
-        </TabsContent>
-
-        <TabsContent value="deepdive" className="mt-6">
-           {selectedSubject ? (
-             <TeacherDeepDiveTab reportData={reportData} selectedSubject={selectedSubject} relevantStudents={relevantStudents} />
-           ) : (
-             <div className="text-center py-24 text-muted-foreground"><BookOpen className="h-10 w-10 mx-auto mb-3 opacity-20" />Select a Class/Subject above to view reports.</div>
-           )}
-        </TabsContent>
+          <TabsContent value="deepdive" className="mt-6">
+            {selectedSubject ? (
+              <TeacherDeepDiveTab 
+                reportData={reportData} 
+                selectedSubject={selectedSubject} 
+                subjectName={currentAssignment?.subjectName}
+                subjectCode={currentAssignment?.subjectCode}
+                relevantStudents={relevantStudents} 
+              />
+            ) : (
+              <div className="text-center py-24 text-muted-foreground"><BookOpen className="h-10 w-10 mx-auto mb-3 opacity-20" />Select a Class/Subject above to view reports.</div>
+            )}
+          </TabsContent>
 
         </Tabs>
       </div>

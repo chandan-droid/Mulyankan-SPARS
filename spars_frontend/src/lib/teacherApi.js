@@ -147,6 +147,21 @@ function normalizeAssignment(item) {
     teacherId: item.teacherId,
     subjectId: item.subjectId,
     classId: item.classId,
+    subjectName:
+      item.subjectName ??
+      item.subject_name ??
+      item.subject?.subjectName ??
+      item.subject?.subject_name ??
+      item.subject?.name ??
+      null,
+    subjectCode:
+      item.subjectCode ??
+      item.subject_code ??
+      item.subject?.subjectCode ??
+      item.subject?.subject_code ??
+      item.subject?.code ??
+      null,
+    subject: item.subject ?? null,
     // Optional fields that the backend may include in extended responses
     branch: item.branch ?? null,
     semester: item.semester ?? null,
@@ -188,6 +203,20 @@ function normalizeAssessment(item) {
     name: item.name,
     type: item.type,
     subjectId: item.subjectId,
+    subjectName:
+      item.subjectName ??
+      item.subject_name ??
+      item.subject?.subjectName ??
+      item.subject?.subject_name ??
+      item.subject?.name ??
+      null,
+    subjectCode:
+      item.subjectCode ??
+      item.subject_code ??
+      item.subject?.subjectCode ??
+      item.subject?.subject_code ??
+      item.subject?.code ??
+      null,
     classId: item.classId,
     maxMarks: item.maxMarks,
     date: item.examDate ?? item.date ?? null,

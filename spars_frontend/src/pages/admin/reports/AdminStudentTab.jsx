@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer, Tooltip as RTC } from 'recharts';
 import { FileText, FileSpreadsheet, Target, TrendingUp, Award, Users, Loader2 } from 'lucide-react';
-import { getGrade, exportStudentReportPDF, exportToExcel } from '@/lib/reportUtils';
+import { getGrade, getPerformanceColor, exportStudentReportPDF, exportToExcel } from '@/lib/reportUtils';
 import { getAdminStudentCoAttainment } from '@/lib/adminApi';
 
 function PerformBadge({ pct }) {
@@ -61,6 +61,48 @@ export default function AdminStudentTab({ reportData, deepLinkStudentId, onDeepL
         if (!selectedClassId) return true;
         return String(mark.assessmentInfo?.classId ?? '') === String(selectedClassId);
       });
+
+    const groupedBySubject = new Map();
+    studentMarks.forEach((mark) => {
+      const subjectKey = String(mark.subjectInfo?.id ?? mark.assessmentInfo?.subjectId ?? mark.subjectInfo?.subjectCode ?? 'unassigned');
+      const subjectName = mark.subjectInfo?.subjectName ?? mark.subjectInfo?.name ?? 'Unassigned Subject';
+      const subjectCode = mark.subjectInfo?.subjectCode ?? mark.subjectInfo?.code ?? '';
+
+      if (!groupedBySubject.has(subjectKey)) {
+        groupedBySubject.set(subjectKey, {
+          subjectName,
+          subjectCode,
+          rows: [],
+        });
+      }
+
+      groupedBySubject.get(subjectKey).rows.push({
+        type: mark.assessmentType || mark.assessmentInfo?.type || 'ASSESSMENT',
+        assessment: mark.assessmentInfo?.name || 'Assessment',
+        subject: subjectName || subjectCode || 'N/A',
+        subjectCode: subjectCode || '',
+        marks: Number(mark.totalMarks ?? mark.marksObtained ?? 0),
+        maxMarks: Number(mark.assessmentInfo?.maxMarks ?? 0),
+        percentage: Number(mark.assessmentInfo?.maxMarks ?? 0) > 0
+          ? +(((Number(mark.totalMarks ?? mark.marksObtained ?? 0) / Number(mark.assessmentInfo?.maxMarks ?? 0)) * 100).toFixed(1))
+          : 0,
+        quizMarks: mark.quizMarks ?? Number(mark.totalMarks ?? mark.marksObtained ?? 0),
+      });
+    });
+
+    const subjectSections = Array.from(groupedBySubject.values())
+      .map((section) => {
+        const totalMarks = section.rows.reduce((sum, row) => sum + row.marks, 0);
+        const maxPossible = section.rows.reduce((sum, row) => sum + row.maxMarks, 0);
+        const pct = maxPossible > 0 ? +((totalMarks / maxPossible) * 100).toFixed(1) : 0;
+        return {
+          ...section,
+          totalMarks,
+          maxPossible,
+          pct,
+        };
+      })
+      .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
 
     const rows = studentMarks.map((mark) => {
       const marksValue = Number(mark.totalMarks ?? mark.marksObtained ?? 0);
@@ -136,6 +178,7 @@ export default function AdminStudentTab({ reportData, deepLinkStudentId, onDeepL
       pct,
       percentile,
       grade: getGrade(pct),
+      subjectSections,
     };
   }, [
     selStudent,
@@ -206,6 +249,19 @@ export default function AdminStudentTab({ reportData, deepLinkStudentId, onDeepL
     return () => { cancel = true; };
   }, [selStudent, selectedSubjectId]);
 
+  // Default selection logic
+  useEffect(() => {
+    if (!selectedClassId && allClasses.length > 0) {
+      setSelectedClassId(String(allClasses[0].id));
+    }
+  }, [allClasses, selectedClassId]);
+
+  useEffect(() => {
+    if (selectedClassId && !selStudent && filteredStudents.length > 0) {
+      setSelStudent(String(filteredStudents[0].id));
+    }
+  }, [selectedClassId, filteredStudents, selStudent]);
+
   const handleExportPDF = () => {
     if (!report) return;
     exportStudentReportPDF({
@@ -249,9 +305,8 @@ export default function AdminStudentTab({ reportData, deepLinkStudentId, onDeepL
                   setSelStudent(''); 
                 }}
               >
-                <SelectTrigger className="rounded-xl h-10 bg-card"><SelectValue placeholder="All Classes" /></SelectTrigger>
+                <SelectTrigger className="rounded-xl h-10 bg-card"><SelectValue placeholder="Select Class" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Classes</SelectItem>
                   {allClasses.map(c => (
                     <SelectItem key={c.id} value={String(c.id)}>
                       {c.branch} - S{c.semester} ({c.section})
@@ -322,28 +377,46 @@ export default function AdminStudentTab({ reportData, deepLinkStudentId, onDeepL
           <div className="grid gap-6 lg:grid-cols-3">
             {/* Marks breakdown table */}
             <Card className="glass-card overflow-hidden lg:col-span-2">
-              <CardHeader className="bg-muted/20 border-b border-border/30"><CardTitle className="text-sm font-heading font-semibold">Assessment Breakdown</CardTitle></CardHeader>
+              <CardHeader className="bg-muted/20 border-b border-border/30"><CardTitle className="text-sm font-heading font-semibold">Subject-wise Performance</CardTitle></CardHeader>
               <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      {['Subject', 'Type', 'Marks', 'Max', 'Percentage'].map(h => (
-                        <TableHead key={h} className="font-semibold text-xs uppercase tracking-wider text-muted-foreground/70">{h}</TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {report.rows.map((r, i) => (
-                      <TableRow key={i} className="hover:bg-primary/[0.02]">
-                        <TableCell className="text-xs font-medium max-w-[120px] truncate" title={r.subject}>{r.subject}</TableCell>
-                        <TableCell><Badge variant="outline" className="text-[10px] bg-primary/5 text-primary border-primary/15">{r.type}</Badge></TableCell>
-                        <TableCell className="font-semibold text-sm">{r.marks}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{r.maxMarks}</TableCell>
-                        <TableCell><PerformBadge pct={r.percentage} /></TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                <div className="space-y-4 p-4">
+                  {report.subjectSections?.map((section) => (
+                    <div key={`${section.subjectName}-${section.subjectCode}`} className="overflow-hidden rounded-2xl border border-border/40 bg-background/40">
+                      <div className="flex flex-col gap-2 border-b border-border/30 bg-muted/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-heading font-semibold text-foreground">{section.subjectName}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {section.subjectCode ? `${section.subjectCode} • ` : ''}{section.rows.length} assessments
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-muted-foreground">{section.totalMarks} / {section.maxPossible}</span>
+                          <PerformBadge pct={section.pct} />
+                        </div>
+                      </div>
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent">
+                            {['Assessment', 'Type', 'Marks', 'Max', 'Percentage'].map(h => (
+                              <TableHead key={h} className="font-semibold text-xs uppercase tracking-wider text-muted-foreground/70">{h}</TableHead>
+                            ))}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {section.rows.map((r, i) => (
+                            <TableRow key={i} className="hover:bg-primary/[0.02]">
+                              <TableCell className="text-xs font-medium max-w-[140px] truncate" title={r.assessment}>{r.assessment}</TableCell>
+                              <TableCell><Badge variant="outline" className="text-[10px] bg-primary/5 text-primary border-primary/15">{r.type}</Badge></TableCell>
+                              <TableCell className="font-semibold text-sm">{r.marks}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{r.maxMarks}</TableCell>
+                              <TableCell><PerformBadge pct={r.percentage} /></TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ))}
+                </div>
               </CardContent>
             </Card>
 
@@ -360,7 +433,7 @@ export default function AdminStudentTab({ reportData, deepLinkStudentId, onDeepL
                   <SelectContent>
                     {studentSubjects.map(s => (
                       <SelectItem key={s.id} value={String(s.id)}>
-                        {s.subjectCode}
+                        {s.subjectName || s.name} ({s.subjectCode || s.code})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -374,11 +447,18 @@ export default function AdminStudentTab({ reportData, deepLinkStudentId, onDeepL
                 ) : coData.length > 0 ? (
                   <ResponsiveContainer width="100%" height={260}>
                     <RadarChart cx="50%" cy="50%" outerRadius="70%" data={coData}>
-                      <PolarGrid stroke="hsl(225,14%,90%)" />
-                      <PolarAngleAxis dataKey="co" tick={{ fill: 'hsl(224,12%,48%)', fontSize: 11 }} />
-                      <PolarRadiusAxis angle={30} domain={[0, 100]} />
-                      <Radar name="Attainment %" dataKey="avg" stroke="hsl(235,65%,55%)" fill="hsl(235,65%,55%)" fillOpacity={0.4} />
-                      <RTC wrapperStyle={{ borderRadius: '12px' }} />
+                      <PolarGrid stroke="hsl(var(--border))" />
+                      <PolarAngleAxis dataKey="co" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} />
+                      <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 10 }} />
+                      {(() => {
+                        const avg = coData.length > 0 ? coData.reduce((s, c) => s + c.avg, 0) / coData.length : 0;
+                        const color = getPerformanceColor(avg);
+                        return <Radar name="Attainment %" dataKey="avg" stroke={color} fill={color} fillOpacity={0.4} />;
+                      })()}
+                      <RTC 
+                        contentStyle={{ borderRadius: '12px', backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }} 
+                        itemStyle={{ fontSize: '12px' }}
+                      />
                     </RadarChart>
                   </ResponsiveContainer>
                 ) : (

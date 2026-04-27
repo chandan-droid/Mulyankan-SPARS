@@ -660,7 +660,7 @@ function TeacherCard({ teacher, delay, onEdit, onAssign }) {
           </div>
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
             <Building2 className="h-4 w-4 text-primary/60" />
-            <span>{teacher.department || 'General'} Department</span>
+            <span>{teacher.department || 'General'} </span>
           </div>
           <div className="pt-2 flex items-center gap-2">
             <Button

@@ -11,12 +11,15 @@ const DISTRIBUTION_COLORS = [
   'hsl(0,72%,55%)', 'hsl(215,90%,56%)', 'hsl(280,65%,55%)',
 ];
 
-export default function TeacherDeepDiveTab({ reportData, selectedSubject, relevantStudents }) {
+export default function TeacherDeepDiveTab({ reportData, selectedSubject, relevantStudents, subjectName, subjectCode }) {
   const marksData = Array.isArray(reportData?.marks) ? reportData.marks : [];
   const allAssessments = reportData?.assessments ?? [];
   const [selectedAssesmentId, setSelectedAssesmentId] = useState('');
   const [distribution, setDistribution] = useState([]);
   const [distLoading, setDistLoading] = useState(false);
+
+  const resolvedSubjectName = subjectName || '';
+  const resolvedSubjectCode = subjectCode || '';
 
   const subjectAssessments = useMemo(() => {
     if (!selectedSubject) return [];
@@ -54,10 +57,10 @@ export default function TeacherDeepDiveTab({ reportData, selectedSubject, releva
       const totalMarks = m.totalMarks ?? m.marksObtained ?? 0;
       const pct = a.maxMarks > 0 ? +((totalMarks / a.maxMarks) * 100).toFixed(1) : 0;
       return { student, marks: totalMarks, pct };
-    }).filter(Boolean).sort((a,b) => b.marks - a.marks);
+    }).filter(Boolean).sort((a, b) => b.marks - a.marks);
 
     const avgPct = rows.length > 0 ? +(rows.reduce((s, r) => s + r.pct, 0) / rows.length).toFixed(1) : 0;
-    const isOutlierTop = (idx) => idx < Math.ceil(rows.length * 0.1); 
+    const isOutlierTop = (idx) => idx < Math.ceil(rows.length * 0.1);
     const isOutlierBottom = (idx) => idx >= rows.length - Math.ceil(rows.length * 0.1);
 
     return { a, rows, avgPct, isOutlierTop, isOutlierBottom };
@@ -155,14 +158,14 @@ export default function TeacherDeepDiveTab({ reportData, selectedSubject, releva
                 <p className="text-4xl font-heading font-bold text-foreground">{deepDiveReport.avgPct}%</p>
               </CardContent>
             </Card>
-            <div className="flex gap-4 p-4 rounded-xl border border-primary/20 bg-primary/5 items-center">
+            {/* <div className="flex gap-4 p-4 rounded-xl border border-primary/20 bg-primary/5 items-center">
               <Trophy className="h-5 w-5 text-amber-500" />
               <p className="text-sm font-medium">Top 10% outlier students highlighted in <span className="text-emerald-600 font-bold">Green</span>.</p>
             </div>
             <div className="flex gap-4 p-4 rounded-xl border border-destructive/20 bg-destructive/5 items-center">
               <AlertTriangle className="h-5 w-5 text-red-500" />
               <p className="text-sm font-medium">Bottom 10% outlier students highlighted in <span className="text-red-500 font-bold">Red</span>.</p>
-            </div>
+            </div> */}
           </div>
 
           <Card className="glass-card overflow-hidden">
@@ -179,7 +182,7 @@ export default function TeacherDeepDiveTab({ reportData, selectedSubject, releva
                 <TableBody>
                   {deepDiveReport.rows.map((r, i) => (
                     <TableRow key={i} className={`hover:bg-primary/[0.02] ${deepDiveReport.isOutlierTop(i) ? 'bg-emerald-500/[0.05]' : deepDiveReport.isOutlierBottom(i) ? 'bg-red-500/[0.05]' : ''}`}>
-                      <TableCell className="font-bold text-xs text-muted-foreground">#{i+1}</TableCell>
+                      <TableCell className="font-bold text-xs text-muted-foreground">#{i + 1}</TableCell>
                       <TableCell className="font-medium text-sm">
                         {r.student.name}
                         {deepDiveReport.isOutlierTop(i) && <span className="ml-2 text-[10px] text-emerald-600 font-bold uppercase tracking-wider">Top 10%</span>}

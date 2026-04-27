@@ -31,7 +31,6 @@ import {
   getAdminTeachers,
   getAdminTeacherAssignments,
 } from '@/lib/adminApi';
-import AdminAnalyticsTab from './reports/AdminAnalyticsTab';
 import AdminClassTab from './reports/AdminClassTab';
 import AdminStudentTab from './reports/AdminStudentTab';
 import AdminSubjectTab from './reports/AdminSubjectTab';
@@ -279,9 +278,6 @@ export default function AdminReports() {
           <TabsTrigger value="student" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
             Student Report
           </TabsTrigger>
-          <TabsTrigger value="analytics" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
-            Analytics
-          </TabsTrigger>
           <TabsTrigger value="subject" className="rounded-lg text-xs font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm">
             Subject-wise
           </TabsTrigger>
@@ -299,10 +295,6 @@ export default function AdminReports() {
 
         <TabsContent value="student" className="animate-fade-in-up mt-6">
           <AdminStudentTab reportData={reportData} deepLinkStudentId={deepLinkStudentId} onDeepLinkConsumed={() => setDeepLinkStudentId(null)} />
-        </TabsContent>
-
-        <TabsContent value="analytics" className="animate-fade-in-up mt-6">
-          <AdminAnalyticsTab reportData={reportData} />
         </TabsContent>
 
         <TabsContent value="subject" className="animate-fade-in-up mt-6">
